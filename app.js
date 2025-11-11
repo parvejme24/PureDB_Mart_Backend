@@ -1,5 +1,8 @@
-const express = require("express");
-const cors = require("cors");
+import express from "express";
+import cors from "cors";
+import authRouter from "./src/modules/auth/auth.routes.ts";
+import categoryRouter from "./src/modules/category/category.routes.js";
+
 const app = express();
 
 // CORS options
@@ -19,4 +22,8 @@ app.get("/", (req, res) => {
   res.json({ message: "PureDB_Mart Server Working" });
 });
 
-module.exports = app;
+// Routes
+app.use("/api/auth", authRouter);
+app.use("/api/categories", categoryRouter);
+
+export default app;
