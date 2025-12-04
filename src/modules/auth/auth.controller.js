@@ -1,14 +1,7 @@
 import User from "./auth.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import cloudinary from "cloudinary";
-
-// Cloudinary Config
-cloudinary.v2.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+import { uploadFromBuffer, deleteImage } from "../../utils/cloudinary.js";
 
 // Helper: Generate JWT
 const generateToken = (user) => {
@@ -64,6 +57,7 @@ export const loginUser = async (req, res) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        image: user.image,
       },
       token,
     });
@@ -94,33 +88,55 @@ export const updateProfile = async (req, res) => {
 
     const { fullName, password, address } = req.body;
 
+    // Update fullName
     if (fullName) user.fullName = fullName;
-    if (password) user.password = await bcrypt.hash(password, 10);
-    if (address) user.address = address;
 
-    if (req.file) {
-      // Delete old image from Cloudinary if exists
-      if (user.image?.public_id) {
-        await cloudinary.v2.uploader.destroy(user.image.public_id);
+    // Update password
+    if (password) user.password = password; // Will be hashed by pre-save hook
+
+    // Update address - handle JSON parsing safely
+    if (address) {
+      try {
+        user.address = typeof address === "string" ? JSON.parse(address) : address;
+      } catch (parseError) {
+        return res.status(400).json({ 
+          message: "Invalid address format. Please send valid JSON.",
+          example: '{"country": "Bangladesh", "division": "Dhaka", "district": "Dhaka", "street": "Your Street", "postalCode": "1216"}'
+        });
       }
+    }
 
-      const uploadResponse = await cloudinary.v2.uploader.upload(
-        req.file.path,
-        {
-          folder: "profile_images",
+    // Handle image upload
+    if (req.file) {
+      try {
+        // Delete old image from Cloudinary if exists
+        if (user.image?.public_id) {
+          await deleteImage(user.image.public_id);
         }
-      );
-      user.image = {
-        url: uploadResponse.secure_url,
-        public_id: uploadResponse.public_id,
-      };
+
+        // Upload new image
+        const uploadResult = await uploadFromBuffer(req.file.buffer, "profile_images");
+        user.image = {
+          url: uploadResult.url,
+          public_id: uploadResult.public_id,
+        };
+      } catch (uploadError) {
+        console.error("Cloudinary upload error:", uploadError);
+        return res.status(500).json({ 
+          message: "Image upload failed. Please check Cloudinary configuration.",
+          error: uploadError.message 
+        });
+      }
     }
 
     await user.save();
-    res.status(200).json({ message: "Profile updated successfully", user });
+
+    // Return user without password
+    const updatedUser = await User.findById(user._id).select("-password");
+    res.status(200).json({ message: "Profile updated successfully", user: updatedUser });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error" });
+    console.error("Update profile error:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
 
@@ -148,8 +164,15 @@ export const changeUserRole = async (req, res) => {
 // -------------------- Delete User (Admin only) --------------------
 export const deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Delete user image from Cloudinary if exists
+    if (user.image?.public_id) {
+      await deleteImage(user.image.public_id);
+    }
+
+    await user.deleteOne();
 
     res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {

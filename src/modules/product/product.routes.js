@@ -1,26 +1,25 @@
 import express from "express";
-import multer from "multer";
+import upload from "../../middleware/upload.js";
 import {
   createProduct,
   getAllProducts,
-  getProductById,
+  getProductBySlug,
   getProductsByCategorySlug,
   updateProduct,
   deleteProduct,
 } from "./product.controller.js";
+import { protect, admin } from "../../middleware/authMiddleware.js";
 
 const productRouter = express.Router();
 
-// -------------------- Multer Config --------------------
-const storage = multer.diskStorage({});
-const upload = multer({ storage });
-
-// -------------------- Routes --------------------
-productRouter.post("/", upload.single("image"), createProduct);
+// Public routes
 productRouter.get("/", getAllProducts);
-productRouter.get("/:id", getProductById);
 productRouter.get("/category/:slug", getProductsByCategorySlug);
-productRouter.put("/:id", upload.single("image"), updateProduct);
-productRouter.delete("/:id", deleteProduct);
+productRouter.get("/:slug", getProductBySlug);
+
+// Admin only routes
+productRouter.post("/", protect, admin, upload.single("image"), createProduct);
+productRouter.put("/:id", protect, admin, upload.single("image"), updateProduct);
+productRouter.delete("/:id", protect, admin, deleteProduct);
 
 export default productRouter;

@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 
-import authRouter from "./src/modules/auth/auth.routes.ts";
+import authRouter from "./src/modules/auth/auth.routes.js";
 import categoryRouter from "./src/modules/category/category.routes.js";
 import productRouter from "./src/modules/product/product.routes.js";
 import orderRouter from "./src/modules/order/order.routes.js";

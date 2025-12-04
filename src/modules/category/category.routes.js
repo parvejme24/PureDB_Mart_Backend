@@ -1,5 +1,5 @@
 import express from "express";
-import multer from "multer";
+import upload from "../../middleware/upload.js";
 import {
   createCategory,
   getAllCategories,
@@ -9,18 +9,15 @@ import {
 } from "./category.controller.js";
 import { protect, admin } from "../../middleware/authMiddleware.js";
 
-const storage = multer.diskStorage({});
-const upload = multer({ storage });
-
 const categoryRouter = express.Router();
 
-// Public
+// Public routes
 categoryRouter.get("/", getAllCategories);
 categoryRouter.get("/:slug", getSingleCategory);
 
-// Admin only
+// Admin only routes
 categoryRouter.post("/", protect, admin, upload.single("image"), createCategory);
-categoryRouter.put("/:slug", protect, admin, upload.single("image"), updateCategory);
-categoryRouter.delete("/:slug", protect, admin, deleteCategory);
+categoryRouter.put("/:id", protect, admin, upload.single("image"), updateCategory);
+categoryRouter.delete("/:id", protect, admin, deleteCategory);
 
 export default categoryRouter;
