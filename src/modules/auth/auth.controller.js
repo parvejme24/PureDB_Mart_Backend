@@ -13,12 +13,12 @@ const generateToken = (user) => {
 // -------------------- Register User --------------------
 export const registerUser = async (req, res) => {
   try {
-    const { fullName, email, password } = req.body;
+    const { fullName, email, password, phone } = req.body;
     const existingUser = await User.findOne({ email });
     if (existingUser)
       return res.status(400).json({ message: "User already exists" });
 
-    const user = await User.create({ fullName, email, password });
+    const user = await User.create({ fullName, email, password, phone });
     const token = generateToken(user);
 
     res.status(201).json({
@@ -27,6 +27,7 @@ export const registerUser = async (req, res) => {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
+        phone: user.phone,
         role: user.role,
       },
       token,
@@ -56,6 +57,7 @@ export const loginUser = async (req, res) => {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         image: user.image,
       },
@@ -86,10 +88,13 @@ export const updateProfile = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const { fullName, password, address } = req.body;
+    const { fullName, phone, password, address } = req.body;
 
     // Update fullName
     if (fullName) user.fullName = fullName;
+
+    // Update phone
+    if (phone) user.phone = phone;
 
     // Update password
     if (password) user.password = password; // Will be hashed by pre-save hook
@@ -101,7 +106,7 @@ export const updateProfile = async (req, res) => {
       } catch (parseError) {
         return res.status(400).json({ 
           message: "Invalid address format. Please send valid JSON.",
-          example: '{"country": "Bangladesh", "division": "Dhaka", "district": "Dhaka", "street": "Your Street", "postalCode": "1216"}'
+          example: '{"country": "Bangladesh", "division": "Dhaka", "district": "Dhaka", "upazila": "Dhanmondi", "postalCode": "1216", "detailsAddress": "House 123, Road 5"}'
         });
       }
     }
@@ -154,7 +159,8 @@ export const changeUserRole = async (req, res) => {
     user.role = role;
     await user.save();
 
-    res.status(200).json({ message: "User role updated successfully", user });
+    const updatedUser = await User.findById(user._id).select("-password");
+    res.status(200).json({ message: "User role updated successfully", user: updatedUser });
   } catch (error) {
     console.log(error);
     res.status(500).json({ message: "Server Error" });

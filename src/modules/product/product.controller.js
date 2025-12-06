@@ -6,7 +6,7 @@ import { uploadFromBuffer, deleteImage } from "../../utils/cloudinary.js";
 // -------------------- Create Product --------------------
 export const createProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock } = req.body;
+    const { name, description, price, category, stock, discount = 0, weight = 0 } = req.body;
 
     // Validate required fields
     if (!name || !description || !price || !category || !stock) {
@@ -26,11 +26,16 @@ export const createProduct = async (req, res) => {
     // Upload image to Cloudinary
     const uploadResult = await uploadFromBuffer(req.file.buffer, "products");
 
+    const discountAmount = Math.max(0, Number(discount) || 0);
+    const weightValue = Math.max(0, Number(weight) || 0);
+
     const product = await Product.create({
       name,
       slug: slugify(name, { lower: true }),
       description,
       price,
+      discount: discountAmount,
+      weight: weightValue,
       category,
       stock,
       image: {
@@ -91,7 +96,7 @@ export const getProductsByCategorySlug = async (req, res) => {
 // -------------------- Update Product --------------------
 export const updateProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock } = req.body;
+    const { name, description, price, category, stock, discount, weight } = req.body;
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
@@ -101,7 +106,7 @@ export const updateProduct = async (req, res) => {
       product.slug = slugify(name, { lower: true });
     }
     if (description) product.description = description;
-    if (price) product.price = price;
+    if (price !== undefined) product.price = price;
     if (category) {
       const categoryExists = await Category.findById(category);
       if (!categoryExists)
@@ -109,6 +114,14 @@ export const updateProduct = async (req, res) => {
       product.category = category;
     }
     if (stock !== undefined) product.stock = stock;
+    if (discount !== undefined) {
+      const parsedDiscount = Number(discount);
+      product.discount = parsedDiscount >= 0 ? parsedDiscount : 0;
+    }
+    if (weight !== undefined) {
+      const parsedWeight = Number(weight);
+      product.weight = parsedWeight >= 0 ? parsedWeight : 0;
+    }
 
     // Handle image update
     if (req.file) {

@@ -16,6 +16,9 @@ const UserSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    phone: {
+      type: String,
+    },
     image: {
       url: { type: String, default: "" },
       public_id: { type: String, default: "" },
@@ -33,8 +36,9 @@ const UserSchema = new mongoose.Schema(
       country: { type: String, default: "" },
       division: { type: String, default: "" },
       district: { type: String, default: "" },
-      street: { type: String, default: "" },
+      upazila: { type: String, default: "" },
       postalCode: { type: String, default: "" },
+      detailsAddress: { type: String, default: "" },
     },
   },
   { timestamps: true }

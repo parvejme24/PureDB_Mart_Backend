@@ -38,3 +38,5 @@ build/
 
 # Optional: coverage reports
 coverage/
+.vercel
+.env*.local
