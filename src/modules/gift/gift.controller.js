@@ -39,6 +39,9 @@ export const createGift = async (req, res) => {
       if (quantity <= 0) {
         return res.status(400).json({ message: "Item quantity must be greater than 0" });
       }
+      if (Number(productExists.stock || 0) < quantity) {
+        return res.status(400).json({ message: `Insufficient stock for ${productExists.name || product}` });
+      }
       const unit = parseNumber(unitPrice, 0);
       normalizedItems.push({
         product,
@@ -65,6 +68,14 @@ export const createGift = async (req, res) => {
         email: req.user?.email || "",
       },
     });
+
+    // Reduce stock for gifted items
+    const updatePromises = normalizedItems.map((item) =>
+      Product.findByIdAndUpdate(item.product, {
+        $inc: { stock: -item.qty },
+      })
+    );
+    await Promise.all(updatePromises);
 
     res.status(201).json({ message: "Gift recorded", gift });
   } catch (error) {

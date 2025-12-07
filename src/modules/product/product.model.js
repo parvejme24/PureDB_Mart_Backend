@@ -15,6 +15,14 @@ const ProductSchema = new mongoose.Schema(
       required: true,
     },
     stock: { type: Number, required: true },
+    unit: { type: String, default: "" }, // e.g., pcs, kg, box
+    brand: { type: String, default: "" },
+    barcode: { type: String, default: "" },
+    purchasePrice: { type: Number, default: 0 }, // latest purchase unit price
+    reorderPoint: { type: Number, default: 0 }, // low-stock threshold
+    minStockLevel: { type: Number, default: 0 }, // alternative threshold
+    expiryTracking: { type: Boolean, default: false },
+    expiryWarningDays: { type: Number, default: 30 },
     image: {
       url: { type: String, required: true },
       public_id: { type: String, required: true },

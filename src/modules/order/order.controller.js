@@ -15,6 +15,47 @@ const updatePaymentStatusByBalance = (order) => {
   order.paymentStatus = due > 0 ? "unpaid" : "paid";
 };
 
+const ensureStockAvailability = async (items = []) => {
+  const productIds = items.map((i) => i.product).filter(Boolean);
+  if (!productIds.length) return;
+
+  const products = await Product.find(
+    { _id: { $in: productIds } },
+    "stock name sku"
+  );
+  const productMap = new Map(products.map((p) => [String(p._id), p]));
+
+  for (const item of items) {
+    const productId = String(item.product);
+    const doc = productMap.get(productId);
+    if (!doc) {
+      const error = new Error(`Product not found: ${productId}`);
+      error.statusCode = 404;
+      throw error;
+    }
+    const qty = parseNumber(item.qty, 0);
+    if (qty <= 0) {
+      const error = new Error(`Invalid quantity for product ${doc.name || productId}`);
+      error.statusCode = 400;
+      throw error;
+    }
+    if (Number(doc.stock || 0) < qty) {
+      const error = new Error(`Insufficient stock for ${doc.name || productId}`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+};
+
+const applyStockConsumption = async (items = []) => {
+  const updates = items.map((item) =>
+    Product.findByIdAndUpdate(item.product, {
+      $inc: { sold: item.qty, stock: -parseNumber(item.qty, 0) },
+    })
+  );
+  await Promise.all(updates);
+};
+
 // Create new order
 export const createOrder = async (req, res) => {
   try {
@@ -23,6 +64,8 @@ export const createOrder = async (req, res) => {
     if (!items || items.length === 0) {
       return res.status(400).json({ message: "Order items are required" });
     }
+
+    await ensureStockAvailability(items);
 
     const itemsTotal = computeItemsTotal(items);
     const shipping = parseNumber(shippingCost, 0);
@@ -37,18 +80,13 @@ export const createOrder = async (req, res) => {
       paymentMethod,
     });
 
-    // Update sold count for each product
-    const updatePromises = items.map((item) =>
-      Product.findByIdAndUpdate(item.product, {
-        $inc: { sold: item.qty },
-      })
-    );
-    await Promise.all(updatePromises);
+    await applyStockConsumption(items);
 
     res.status(201).json({ message: "Order created successfully", order });
   } catch (error) {
     console.log(error);
-    res.status(500).json({ message: "Server Error" });
+    const status = error.statusCode || 500;
+    res.status(status).json({ message: error.message || "Server Error" });
   }
 };
 
@@ -70,6 +108,8 @@ export const createCustomOrder = async (req, res) => {
     if (!items || items.length === 0) {
       return res.status(400).json({ message: "Order items are required" });
     }
+
+    await ensureStockAvailability(items);
 
     const itemsTotal = computeItemsTotal(items);
     const shipping = parseNumber(shippingCost, 0);
@@ -105,13 +145,7 @@ export const createCustomOrder = async (req, res) => {
     updatePaymentStatusByBalance(order);
     await order.save();
 
-    // Update sold count for each product
-    const updatePromises = items.map((item) =>
-      Product.findByIdAndUpdate(item.product, {
-        $inc: { sold: item.qty },
-      })
-    );
-    await Promise.all(updatePromises);
+    await applyStockConsumption(items);
 
     res.status(201).json({ message: "Custom order created successfully", order });
   } catch (error) {

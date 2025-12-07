@@ -20,6 +20,9 @@ export const createWaste = async (req, res) => {
 
     const quantity = parseNumber(qty, -1);
     if (quantity <= 0) return res.status(400).json({ message: "qty must be greater than 0" });
+    if (Number(productExists.stock || 0) < quantity) {
+      return res.status(400).json({ message: "Not enough stock to mark as waste" });
+    }
 
     const waste = await Waste.create({
       product,
@@ -34,6 +37,10 @@ export const createWaste = async (req, res) => {
         name: req.user?.name || "",
         email: req.user?.email || "",
       },
+    });
+
+    await Product.findByIdAndUpdate(product, {
+      $inc: { stock: -quantity },
     });
 
     res.status(201).json({ message: "Waste recorded", waste });

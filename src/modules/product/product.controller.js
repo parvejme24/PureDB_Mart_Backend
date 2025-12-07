@@ -6,7 +6,23 @@ import { uploadFromBuffer, deleteImage } from "../../utils/cloudinary.js";
 // -------------------- Create Product --------------------
 export const createProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock, discount = 0, weight = 0 } = req.body;
+    const {
+      name,
+      description,
+      price,
+      category,
+      stock,
+      discount = 0,
+      weight = 0,
+      unit = "",
+      brand = "",
+      barcode = "",
+      purchasePrice = 0,
+      reorderPoint = 0,
+      minStockLevel = 0,
+      expiryTracking = false,
+      expiryWarningDays = 30,
+    } = req.body;
 
     // Validate required fields
     if (!name || !description || !price || !category || !stock) {
@@ -28,6 +44,10 @@ export const createProduct = async (req, res) => {
 
     const discountAmount = Math.max(0, Number(discount) || 0);
     const weightValue = Math.max(0, Number(weight) || 0);
+    const purchasePriceValue = Math.max(0, Number(purchasePrice) || 0);
+    const reorderPointValue = Math.max(0, Number(reorderPoint) || 0);
+    const minStockLevelValue = Math.max(0, Number(minStockLevel) || 0);
+    const warningDaysValue = Math.max(0, Number(expiryWarningDays) || 0) || 30;
 
     const product = await Product.create({
       name,
@@ -38,6 +58,14 @@ export const createProduct = async (req, res) => {
       weight: weightValue,
       category,
       stock,
+      unit,
+      brand,
+      barcode,
+      purchasePrice: purchasePriceValue,
+      reorderPoint: reorderPointValue,
+      minStockLevel: minStockLevelValue,
+      expiryTracking: Boolean(expiryTracking),
+      expiryWarningDays: warningDaysValue,
       image: {
         url: uploadResult.url,
         public_id: uploadResult.public_id,
@@ -96,7 +124,23 @@ export const getProductsByCategorySlug = async (req, res) => {
 // -------------------- Update Product --------------------
 export const updateProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock, discount, weight } = req.body;
+    const {
+      name,
+      description,
+      price,
+      category,
+      stock,
+      discount,
+      weight,
+      unit,
+      brand,
+      barcode,
+      purchasePrice,
+      reorderPoint,
+      minStockLevel,
+      expiryTracking,
+      expiryWarningDays,
+    } = req.body;
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
@@ -121,6 +165,28 @@ export const updateProduct = async (req, res) => {
     if (weight !== undefined) {
       const parsedWeight = Number(weight);
       product.weight = parsedWeight >= 0 ? parsedWeight : 0;
+    }
+    if (unit !== undefined) product.unit = unit;
+    if (brand !== undefined) product.brand = brand;
+    if (barcode !== undefined) product.barcode = barcode;
+    if (purchasePrice !== undefined) {
+      const parsedPurchasePrice = Number(purchasePrice);
+      product.purchasePrice = parsedPurchasePrice >= 0 ? parsedPurchasePrice : 0;
+    }
+    if (reorderPoint !== undefined) {
+      const parsedReorder = Number(reorderPoint);
+      product.reorderPoint = parsedReorder >= 0 ? parsedReorder : 0;
+    }
+    if (minStockLevel !== undefined) {
+      const parsedMin = Number(minStockLevel);
+      product.minStockLevel = parsedMin >= 0 ? parsedMin : 0;
+    }
+    if (expiryTracking !== undefined) {
+      product.expiryTracking = Boolean(expiryTracking);
+    }
+    if (expiryWarningDays !== undefined) {
+      const parsedWarning = Number(expiryWarningDays);
+      product.expiryWarningDays = parsedWarning >= 0 ? parsedWarning : product.expiryWarningDays;
     }
 
     // Handle image update
