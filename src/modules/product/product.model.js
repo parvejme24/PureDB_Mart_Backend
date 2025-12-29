@@ -16,6 +16,7 @@ const ProductSchema = new mongoose.Schema(
     },
     stock: { type: Number, required: true },
     unit: { type: String, default: "" }, // e.g., pcs, kg, box
+    soldCount: { type: Number, default: 0 },
     brand: { type: String, default: "" },
     barcode: { type: String, default: "" },
     purchasePrice: { type: Number, default: 0 }, // latest purchase unit price

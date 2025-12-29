@@ -233,3 +233,73 @@ export const deleteProduct = async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 };
+
+// -------------------- Get Best Selling Products (All Time) --------------------
+export const getBestSellingProducts = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const minSoldCount = parseInt(req.query.minSoldCount) || 1; // Minimum sales count to be considered
+
+    const products = await Product.find({
+      soldCount: { $gte: minSoldCount }
+    })
+      .populate("category")
+      .sort({ soldCount: -1 })
+      .limit(limit);
+
+    res.status(200).json({
+      message: "Best selling products retrieved",
+      products,
+      total: products.length
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// -------------------- Get Deal of the Day Products --------------------
+export const getDealOfTheDay = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const minDiscount = parseInt(req.query.minDiscount) || 1; // Minimum discount percentage
+
+    // Get products with discounts
+    const products = await Product.find({
+      discount: { $gte: minDiscount },
+      stock: { $gt: 0 } // Only products in stock
+    })
+      .populate("category")
+      .sort({ discount: -1, createdAt: -1 }) // Sort by highest discount first, then newest
+      .limit(limit);
+
+    // Calculate discount percentage and savings for each product
+    const deals = products.map(product => {
+      const originalPrice = Number(product.price) || 0;
+      const discountAmount = Number(product.discount) || 0;
+      const discountedPrice = originalPrice - discountAmount;
+      const discountPercentage = originalPrice > 0 ? ((discountAmount / originalPrice) * 100).toFixed(1) : 0;
+      const savings = discountAmount;
+
+      return {
+        ...product.toObject(),
+        dealInfo: {
+          originalPrice,
+          discountedPrice,
+          discountAmount,
+          discountPercentage: parseFloat(discountPercentage),
+          savings
+        }
+      };
+    });
+
+    res.status(200).json({
+      message: "Deal of the day products retrieved",
+      products: deals,
+      total: deals.length
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+};

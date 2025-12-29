@@ -173,7 +173,7 @@ export const paymentCallback = async (req, res) => {
         if (order) {
           const updatePromises = order.items.map((item) =>
             Product.findByIdAndUpdate(item.product, {
-              $inc: { sold: item.qty },
+              $inc: { soldCount: item.qty },
             })
           );
           await Promise.all(updatePromises);
@@ -243,7 +243,7 @@ export const verifyPayment = async (req, res) => {
 
           const updatePromises = order.items.map((item) =>
             Product.findByIdAndUpdate(item.product, {
-              $inc: { sold: item.qty },
+              $inc: { soldCount: item.qty },
             })
           );
           await Promise.all(updatePromises);
@@ -345,7 +345,7 @@ export const paymentIPN = async (req, res) => {
 
           const updatePromises = order.items.map((item) =>
             Product.findByIdAndUpdate(item.product, {
-              $inc: { sold: item.qty },
+              $inc: { soldCount: item.qty },
             })
           );
           await Promise.all(updatePromises);
