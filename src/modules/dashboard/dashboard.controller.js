@@ -177,7 +177,7 @@ export const getProductPerformance = async (req, res) => {
         price: product.price,
         stock: product.stock,
         views: product.views,
-        sold: sales?.totalSold || product.soldCount || 0,
+        sold: sales?.totalSold || product.sold || 0,
         revenue: sales?.totalRevenue || 0,
       };
     });

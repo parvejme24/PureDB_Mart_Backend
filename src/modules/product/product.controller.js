@@ -1,5 +1,6 @@
 import Product from "./product.model.js";
 import Category from "../category/category.model.js";
+import Order from "../order/order.model.js";
 import slugify from "slugify";
 import { uploadFromBuffer, deleteImage } from "../../utils/cloudinary.js";
 
@@ -238,68 +239,117 @@ export const deleteProduct = async (req, res) => {
 export const getBestSellingProducts = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
-    const minSoldCount = parseInt(req.query.minSoldCount) || 1; // Minimum sales count to be considered
+    const minSold = req.query.minSold !== undefined
+      ? parseInt(req.query.minSold)
+      : 1; // Default to 1 if not specified
 
-    const products = await Product.find({
-      soldCount: { $gte: minSoldCount }
-    })
+    // Filter products by sold field
+    const filterQuery = {};
+    if (minSold >= 0) {
+      filterQuery.sold = { $gte: minSold };
+    }
+
+    const products = await Product.find(filterQuery)
       .populate("category")
-      .sort({ soldCount: -1 })
+      .sort({ sold: -1 }) // Sort by sold descending
       .limit(limit);
 
     res.status(200).json({
       message: "Best selling products retrieved",
       products,
-      total: products.length
+      total: products.length,
+      filters: {
+        minSold,
+        limit
+      }
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error" });
+    console.log("Best selling API error:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
 
-// -------------------- Get Deal of the Day Products --------------------
+// -------------------- Get Last Time Ordered Products (Deal of the Day) --------------------
 export const getDealOfTheDay = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
-    const minDiscount = parseInt(req.query.minDiscount) || 1; // Minimum discount percentage
+    const days = parseInt(req.query.days) || 7; // Default to last 7 days
 
-    // Get products with discounts
-    const products = await Product.find({
-      discount: { $gte: minDiscount },
-      stock: { $gt: 0 } // Only products in stock
-    })
-      .populate("category")
-      .sort({ discount: -1, createdAt: -1 }) // Sort by highest discount first, then newest
-      .limit(limit);
+    // Calculate start date for the period
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
 
-    // Calculate discount percentage and savings for each product
-    const deals = products.map(product => {
+    // Aggregate orders to find recently ordered products
+    const recentOrders = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate },
+          status: { $ne: "cancelled" } // Exclude cancelled orders
+        }
+      },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: "$items.product",
+          totalOrdered: { $sum: "$items.qty" },
+          lastOrderedDate: { $max: "$createdAt" },
+          orderCount: { $sum: 1 }, // How many times this product was ordered
+          totalRevenue: { $sum: { $multiply: ["$items.price", "$items.qty"] } }
+        }
+      },
+      {
+        $sort: { lastOrderedDate: -1, totalOrdered: -1 } // Sort by most recent first, then by quantity
+      },
+      {
+        $limit: limit
+      }
+    ]);
+
+    // Get product details for the recently ordered items
+    const productIds = recentOrders.map(order => order._id);
+    const products = await Product.find({ _id: { $in: productIds } }).populate("category");
+
+    // Combine order data with product details
+    const recentProducts = recentOrders.map(orderData => {
+      const product = products.find(p => String(p._id) === String(orderData._id));
+      if (!product) return null;
+
+      // Calculate discount info if product has discount
       const originalPrice = Number(product.price) || 0;
       const discountAmount = Number(product.discount) || 0;
       const discountedPrice = originalPrice - discountAmount;
       const discountPercentage = originalPrice > 0 ? ((discountAmount / originalPrice) * 100).toFixed(1) : 0;
-      const savings = discountAmount;
 
       return {
         ...product.toObject(),
-        dealInfo: {
+        orderInfo: {
+          totalOrdered: orderData.totalOrdered,
+          lastOrderedDate: orderData.lastOrderedDate,
+          orderCount: orderData.orderCount,
+          totalRevenue: orderData.totalRevenue,
+          periodDays: days
+        },
+        dealInfo: discountAmount > 0 ? {
           originalPrice,
           discountedPrice,
           discountAmount,
           discountPercentage: parseFloat(discountPercentage),
-          savings
-        }
+          savings: discountAmount
+        } : null
       };
-    });
+    }).filter(Boolean); // Remove null entries
 
     res.status(200).json({
-      message: "Deal of the day products retrieved",
-      products: deals,
-      total: deals.length
+      message: `Recently ordered products (last ${days} days)`,
+      products: recentProducts,
+      total: recentProducts.length,
+      period: {
+        startDate,
+        days
+      }
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error" });
+    console.log("Deal of the day API error:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 };

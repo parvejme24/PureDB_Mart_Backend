@@ -50,7 +50,7 @@ const ensureStockAvailability = async (items = []) => {
 const applyStockConsumption = async (items = []) => {
   const updates = items.map((item) =>
     Product.findByIdAndUpdate(item.product, {
-      $inc: { soldCount: item.qty, stock: -parseNumber(item.qty, 0) },
+      $inc: { sold: item.qty, stock: -parseNumber(item.qty, 0) },
     })
   );
   await Promise.all(updates);
