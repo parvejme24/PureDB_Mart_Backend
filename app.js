@@ -14,6 +14,8 @@ import inventoryRouter from "./src/modules/inventory/inventory.routes.js";
 import giftRouter from "./src/modules/gift/gift.routes.js";
 import wasteRouter from "./src/modules/waste/waste.routes.js";
 import expenseRouter from "./src/modules/expense/expense.routes.js";
+import productReviewRouter from "./src/modules/productReview/productReview.routes.js";
+import productWishlistRouter from "./src/modules/productWishlist/productWishlist.routes.js";
 
 const app = express();
 
@@ -28,7 +30,10 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || process.env.NODE_ENV === "production") {
+    if (
+      allowedOrigins.includes(origin) ||
+      process.env.NODE_ENV === "production"
+    ) {
       callback(null, true);
     } else {
       callback(null, true); // Allow all origins for now
@@ -39,21 +44,26 @@ const corsOptions = {
   credentials: true,
 };
 
-// Middleware
-app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true })); // For ShurjoPay form data
-
 // Database connection middleware for serverless
 app.use(async (req, res, next) => {
   try {
-    await connectDB();
+    // This will be handled by the Vercel function in index.js
+    // but we keep it here for local development
+    if (process.env.NODE_ENV !== "production") {
+      const connectDB = (await import("./src/config/db.js")).default;
+      await connectDB();
+    }
     next();
   } catch (error) {
     console.error("Database connection error:", error);
     res.status(500).json({ message: "Database connection failed" });
   }
 });
+
+// Middleware
+app.use(cors(corsOptions));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // For ShurjoPay form data
 
 // Default Route
 app.get("/", (req, res) => {
@@ -73,5 +83,8 @@ app.use("/api/inventory", inventoryRouter);
 app.use("/api/gifts", giftRouter);
 app.use("/api/waste", wasteRouter);
 app.use("/api/expenses", expenseRouter);
+
+app.use("/api/reviews", productReviewRouter);
+app.use("/api/wishlist", productWishlistRouter);
 
 export default app;

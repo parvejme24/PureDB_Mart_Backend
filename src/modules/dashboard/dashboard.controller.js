@@ -2,6 +2,9 @@ import User from "../auth/auth.model.js";
 import Order from "../order/order.model.js";
 import Product from "../product/product.model.js";
 import Category from "../category/category.model.js";
+import { InventoryPurchase } from "../inventory/inventory.model.js";
+import Expense from "../expense/expense.model.js";
+import Waste from "../waste/waste.model.js";
 
 // -------------------- Dashboard Stats --------------------
 // GET /api/dashboard/stats
@@ -347,6 +350,257 @@ export const getCategoryPerformance = async (req, res) => {
 };
 
 // -------------------- Increment Product View --------------------
+// -------------------- Revenue Analytics --------------------
+export const getRevenueAnalytics = async (req, res) => {
+  try {
+    const { year, month } = req.query;
+
+    // Default to current year and month
+    const currentDate = new Date();
+    const selectedYear = year ? parseInt(year) : currentDate.getFullYear();
+    const selectedMonth = month ? parseInt(month) : currentDate.getMonth() + 1; // JS months are 0-based
+
+    // Get monthly revenue data for the selected year
+    const monthlyRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $ne: "cancelled" },
+          createdAt: {
+            $gte: new Date(`${selectedYear}-01-01`),
+            $lt: new Date(`${selectedYear + 1}-01-01`)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: "$createdAt" },
+          totalSales: { $sum: "$total" },
+          orderCount: { $sum: 1 },
+          totalItemsSold: { $sum: { $sum: "$items.qty" } }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // Get monthly costs (purchase costs, transport, other costs)
+    const monthlyCosts = await InventoryPurchase.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: new Date(`${selectedYear}-01-01`),
+            $lt: new Date(`${selectedYear + 1}-01-01`)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: "$date" },
+          totalPurchaseCost: { $sum: { $add: ["$transportCost", "$otherCost"] } },
+          totalProductCost: { $sum: { $multiply: ["$quantity", "$unitPrice"] } }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // Get monthly expenses
+    const monthlyExpenses = await Expense.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: new Date(`${selectedYear}-01-01`),
+            $lt: new Date(`${selectedYear + 1}-01-01`)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $month: "$date" },
+          totalExpenses: { $sum: "$amount" }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // Get daily revenue for the selected month
+    const startOfMonth = new Date(selectedYear, selectedMonth - 1, 1);
+    const endOfMonth = new Date(selectedYear, selectedMonth, 1);
+
+    const dailyRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $ne: "cancelled" },
+          createdAt: {
+            $gte: startOfMonth,
+            $lt: endOfMonth
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $dayOfMonth: "$createdAt" },
+          totalSales: { $sum: "$total" },
+          orderCount: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // Get daily costs for the selected month
+    const dailyCosts = await InventoryPurchase.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: startOfMonth,
+            $lt: endOfMonth
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $dayOfMonth: "$date" },
+          totalPurchaseCost: { $sum: { $add: ["$transportCost", "$otherCost"] } },
+          totalProductCost: { $sum: { $multiply: ["$quantity", "$unitPrice"] } }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // Get daily expenses for the selected month
+    const dailyExpenses = await Expense.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: startOfMonth,
+            $lt: endOfMonth
+          }
+        }
+      },
+      {
+        $group: {
+          _id: { $dayOfMonth: "$date" },
+          totalExpenses: { $sum: "$amount" }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // Combine monthly data
+    const monthlyData = [];
+    for (let m = 1; m <= 12; m++) {
+      const sales = monthlyRevenue.find(r => r._id === m);
+      const costs = monthlyCosts.find(c => c._id === m);
+      const expenses = monthlyExpenses.find(e => e._id === m);
+
+      const totalSales = sales?.totalSales || 0;
+      const totalCosts = (costs?.totalPurchaseCost || 0) + (costs?.totalProductCost || 0) + (expenses?.totalExpenses || 0);
+      const netRevenue = totalSales - totalCosts;
+
+      monthlyData.push({
+        month: m,
+        monthName: new Date(selectedYear, m - 1).toLocaleString('default', { month: 'long' }),
+        totalSales,
+        totalCosts,
+        netRevenue,
+        orderCount: sales?.orderCount || 0,
+        itemsSold: sales?.totalItemsSold || 0
+      });
+    }
+
+    // Combine daily data for selected month
+    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+    const dailyData = [];
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const sales = dailyRevenue.find(r => r._id === d);
+      const costs = dailyCosts.find(c => c._id === d);
+      const expenses = dailyExpenses.find(e => e._id === d);
+
+      const totalSales = sales?.totalSales || 0;
+      const totalCosts = (costs?.totalPurchaseCost || 0) + (costs?.totalProductCost || 0) + (expenses?.totalExpenses || 0);
+      const netRevenue = totalSales - totalCosts;
+
+      dailyData.push({
+        day: d,
+        date: new Date(selectedYear, selectedMonth - 1, d).toISOString().split('T')[0],
+        totalSales,
+        totalCosts,
+        netRevenue,
+        orderCount: sales?.orderCount || 0
+      });
+    }
+
+    // Calculate totals for selected month
+    const monthTotal = {
+      totalSales: dailyData.reduce((sum, day) => sum + day.totalSales, 0),
+      totalCosts: dailyData.reduce((sum, day) => sum + day.totalCosts, 0),
+      netRevenue: dailyData.reduce((sum, day) => sum + day.netRevenue, 0),
+      totalOrders: dailyData.reduce((sum, day) => sum + day.orderCount, 0)
+    };
+
+    // Calculate totals for selected year
+    const yearTotal = {
+      totalSales: monthlyData.reduce((sum, month) => sum + month.totalSales, 0),
+      totalCosts: monthlyData.reduce((sum, month) => sum + month.totalCosts, 0),
+      netRevenue: monthlyData.reduce((sum, month) => sum + month.netRevenue, 0),
+      totalOrders: monthlyData.reduce((sum, month) => sum + month.orderCount, 0)
+    };
+
+    res.status(200).json({
+      success: true,
+      currentSelection: {
+        year: selectedYear,
+        month: selectedMonth,
+        monthName: new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long' })
+      },
+      monthlyData,
+      dailyData,
+      monthTotal,
+      yearTotal,
+      availableYears: await getAvailableYears()
+    });
+  } catch (error) {
+    console.error("Revenue analytics error:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
+};
+
+// Helper function to get available years
+const getAvailableYears = async () => {
+  try {
+    const orderYears = await Order.aggregate([
+      { $group: { _id: { $year: "$createdAt" } } },
+      { $sort: { "_id": -1 } }
+    ]);
+
+    const purchaseYears = await InventoryPurchase.aggregate([
+      { $group: { _id: { $year: "$date" } } },
+      { $sort: { "_id": -1 } }
+    ]);
+
+    const allYears = [...new Set([
+      ...orderYears.map(y => y._id),
+      ...purchaseYears.map(y => y._id)
+    ])].sort((a, b) => b - a);
+
+    return allYears.length > 0 ? allYears : [new Date().getFullYear()];
+  } catch (error) {
+    console.error("Get available years error:", error);
+    return [new Date().getFullYear()];
+  }
+};
+
 // POST /api/dashboard/product-view/:productId
 export const incrementProductView = async (req, res) => {
   try {

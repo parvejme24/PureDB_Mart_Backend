@@ -3,9 +3,7 @@ import mongoose from "mongoose";
 const WasteSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
-    productName: { type: String, required: true },
-    sku: { type: String, default: "" },
-    qty: { type: Number, required: true },
+    wasteQty: { type: Number, required: true },
     reason: { type: String, default: "" },
     date: { type: Date, required: true },
     note: { type: String, default: "" },

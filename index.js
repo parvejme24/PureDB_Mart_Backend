@@ -22,12 +22,25 @@ const ensureDbConnection = async () => {
   }
 };
 
-// For Vercel serverless
-if (process.env.VERCEL) {
-  // Connect to DB on cold start
-  ensureDbConnection().catch(console.error);
-} else {
-  // For local development
+// Vercel serverless function
+export default async function handler(req, res) {
+  try {
+    // Ensure database connection for serverless
+    await ensureDbConnection();
+
+    // Handle the request with Express app
+    return app(req, res);
+  } catch (error) {
+    console.error("Serverless function error:", error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
+}
+
+// For local development
+if (process.env.NODE_ENV !== "production") {
   console.log("=== Environment Check ===");
   console.log("CLOUDINARY_CLOUD_NAME:", process.env.CLOUDINARY_CLOUD_NAME ? "✅ Set" : "❌ Missing");
   console.log("CLOUDINARY_API_KEY:", process.env.CLOUDINARY_API_KEY ? "✅ Set" : "❌ Missing");
@@ -47,6 +60,3 @@ if (process.env.VERCEL) {
       console.error("❌ Database connection failed:", err.message);
     });
 }
-
-// Export for Vercel
-export default app;

@@ -1,433 +1,544 @@
+import Payment from "./payment.model.js";
 import Order from "../order/order.model.js";
 import Product from "../product/product.model.js";
-import { v4 as uuidv4 } from "uuid";
 
-// Lazy initialization of ShurjoPay
-let shurjopayInstance = null;
-
-// Check if ShurjoPay is configured
-const checkShurjoPayConfig = () => {
-  const missing = [];
-  if (!process.env.SP_ENDPOINT) missing.push("SP_ENDPOINT");
-  if (!process.env.SP_USERNAME) missing.push("SP_USERNAME");
-  if (!process.env.SP_PASSWORD) missing.push("SP_PASSWORD");
-  if (!process.env.SP_PREFIX) missing.push("SP_PREFIX");
-  if (!process.env.SP_RETURN_URL) missing.push("SP_RETURN_URL");
-  return missing;
+const parseNumber = (value, fallback = 0) => {
+  const num = Number(value);
+  if (Number.isFinite(num) && num >= 0) return num;
+  return fallback;
 };
 
-const getShurjoPay = async () => {
-  const missingVars = checkShurjoPayConfig();
-  if (missingVars.length > 0) {
-    throw new Error(`Missing ShurjoPay config: ${missingVars.join(", ")}`);
-  }
-
-  if (!shurjopayInstance) {
-    const shurjopayModule = await import("shurjopay");
-    shurjopayInstance = shurjopayModule.default();
-    shurjopayInstance.config(
-      process.env.SP_ENDPOINT,
-      process.env.SP_USERNAME,
-      process.env.SP_PASSWORD,
-      process.env.SP_PREFIX,
-      process.env.SP_RETURN_URL
-    );
-  }
-  return shurjopayInstance;
-};
-
-// Promisify makePayment
-const makePaymentAsync = (shurjopay, paymentData) => {
-  return new Promise((resolve, reject) => {
-    shurjopay.makePayment(
-      paymentData,
-      (response) => resolve(response),
-      (error) => reject(error)
-    );
-  });
-};
-
-// Promisify verifyPayment
-const verifyPaymentAsync = (shurjopay, orderId) => {
-  return new Promise((resolve, reject) => {
-    shurjopay.verifyPayment(
+// Create payment for an order
+export const createPayment = async (req, res) => {
+  try {
+    const {
       orderId,
-      (response) => resolve(response),
-      (error) => reject(error)
-    );
-  });
-};
+      amount,
+      method,
+      transactionId = "",
+      reference = "",
+      notes = "",
+      status = "completed"
+    } = req.body;
 
-// -------------------- Initialize Payment --------------------
-// POST /api/payment/init
-export const initPayment = async (req, res) => {
-  try {
-    const { items, customer, total } = req.body;
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ message: "Order items are required" });
-    }
-
-    if (!customer || !customer.name || !customer.email || !customer.phone) {
-      return res.status(400).json({ message: "Customer details are required" });
-    }
-
-    // Generate unique order ID
-    const orderId = `ORD_${uuidv4().replace(/-/g, "").substring(0, 12)}`;
-
-    // Create order with pending payment status
-    const order = await Order.create({
-      items,
-      customer,
-      total,
-      paymentMethod: "ShurjoPay",
-      paymentStatus: "unpaid",
-      transactionId: orderId,
-      status: "pending",
-    });
-
-    // Prepare ShurjoPay payment data
-    const paymentData = {
-      amount: total,
-      order_id: orderId,
-      currency: "BDT",
-      customer_name: customer.name,
-      customer_email: customer.email,
-      customer_phone: customer.phone,
-      customer_address: customer.address?.detailsAddress || "N/A",
-      customer_city: customer.address?.district || "",
-      customer_post_code: customer.address?.postalCode || "",
-      client_ip: req.ip || req.headers["x-forwarded-for"] || "",
-    };
-
-    try {
-      const shurjopay = await getShurjoPay();
-      const response = await makePaymentAsync(shurjopay, paymentData);
-
-      if (response.checkout_url) {
-        res.status(200).json({
-          success: true,
-          message: "Payment initiated successfully",
-          paymentUrl: response.checkout_url,
-          transactionId: orderId,
-          orderId: order._id,
-          spOrderId: response.sp_order_id,
-        });
-      } else {
-        await Order.findByIdAndDelete(order._id);
-        res.status(400).json({
-          success: false,
-          message: "Failed to initialize payment",
-          error: response,
-        });
-      }
-    } catch (paymentError) {
-      await Order.findByIdAndDelete(order._id);
-      console.error("ShurjoPay init error:", paymentError);
-      res.status(500).json({
-        success: false,
-        message: "Payment initialization failed",
-        error: paymentError.message || paymentError,
+    if (!orderId || !amount || !method) {
+      return res.status(400).json({
+        message: "orderId, amount, and method are required"
       });
     }
-  } catch (error) {
-    console.error("Payment init error:", error);
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-};
 
-// -------------------- Payment Callback (Return URL) --------------------
-// GET /api/payment/callback
-export const paymentCallback = async (req, res) => {
-  try {
-    const { order_id } = req.query;
-
-    if (!order_id) {
-      return res.redirect(`${process.env.FRONTEND_URL}/payment/failed?reason=missing_order_id`);
-    }
-
-    try {
-      const shurjopay = await getShurjoPay();
-      const response = await verifyPaymentAsync(shurjopay, order_id);
-      const paymentInfo = response[0];
-
-      if (paymentInfo && paymentInfo.sp_code === "1000") {
-        const order = await Order.findOneAndUpdate(
-          { transactionId: order_id },
-          {
-            paymentStatus: "paid",
-            paymentDetails: {
-              spOrderId: paymentInfo.sp_order_id,
-              bankTranId: paymentInfo.bank_trx_id,
-              cardType: paymentInfo.method,
-              currencyType: paymentInfo.currency,
-              currencyAmount: parseFloat(paymentInfo.amount),
-              validatedOn: new Date(paymentInfo.date_time),
-              bankStatus: paymentInfo.bank_status,
-              spMessage: paymentInfo.sp_message,
-            },
-          },
-          { new: true }
-        );
-
-        if (order) {
-          const updatePromises = order.items.map((item) =>
-            Product.findByIdAndUpdate(item.product, {
-              $inc: { sold: item.qty },
-            })
-          );
-          await Promise.all(updatePromises);
-        }
-
-        res.redirect(
-          `${process.env.FRONTEND_URL}/payment/success?transactionId=${order_id}&orderId=${order?._id}`
-        );
-      } else {
-        const spMessage = paymentInfo?.sp_message || "Payment verification failed";
-        await Order.findOneAndUpdate(
-          { transactionId: order_id },
-          { paymentStatus: "failed" }
-        );
-
-        res.redirect(
-          `${process.env.FRONTEND_URL}/payment/failed?transactionId=${order_id}&reason=${encodeURIComponent(spMessage)}`
-        );
-      }
-    } catch (verifyError) {
-      console.error("Payment verification error:", verifyError);
-      await Order.findOneAndUpdate(
-        { transactionId: order_id },
-        { paymentStatus: "failed" }
-      );
-      res.redirect(
-        `${process.env.FRONTEND_URL}/payment/failed?transactionId=${order_id}&reason=verification_error`
-      );
-    }
-  } catch (error) {
-    console.error("Payment callback error:", error);
-    res.redirect(`${process.env.FRONTEND_URL}/payment/failed?reason=server_error`);
-  }
-};
-
-// -------------------- Verify Payment --------------------
-// POST /api/payment/verify
-export const verifyPayment = async (req, res) => {
-  try {
-    const { order_id } = req.body;
-
-    if (!order_id) {
-      return res.status(400).json({ message: "Order ID is required" });
-    }
-
-    try {
-      const shurjopay = await getShurjoPay();
-      const response = await verifyPaymentAsync(shurjopay, order_id);
-      const paymentInfo = response[0];
-
-      if (paymentInfo && paymentInfo.sp_code === "1000") {
-        const order = await Order.findOne({ transactionId: order_id });
-
-        if (order && order.paymentStatus !== "paid") {
-          order.paymentStatus = "paid";
-          order.paymentDetails = {
-            spOrderId: paymentInfo.sp_order_id,
-            bankTranId: paymentInfo.bank_trx_id,
-            cardType: paymentInfo.method,
-            currencyType: paymentInfo.currency,
-            currencyAmount: parseFloat(paymentInfo.amount),
-            validatedOn: new Date(paymentInfo.date_time),
-            bankStatus: paymentInfo.bank_status,
-            spMessage: paymentInfo.sp_message,
-          };
-          await order.save();
-
-          const updatePromises = order.items.map((item) =>
-            Product.findByIdAndUpdate(item.product, {
-              $inc: { sold: item.qty },
-            })
-          );
-          await Promise.all(updatePromises);
-        }
-
-        res.status(200).json({
-          success: true,
-          message: "Payment verified successfully",
-          paymentStatus: "paid",
-          paymentInfo,
-          orderId: order?._id,
-        });
-      } else {
-        res.status(200).json({
-          success: false,
-          message: paymentInfo?.sp_message || "Payment not completed",
-          paymentStatus: paymentInfo?.bank_status || "failed",
-          paymentInfo,
-        });
-      }
-    } catch (verifyError) {
-      console.error("Verify payment error:", verifyError);
-      res.status(500).json({
-        success: false,
-        message: "Payment verification failed",
-        error: verifyError.message || verifyError,
-      });
-    }
-  } catch (error) {
-    console.error("Verify payment error:", error);
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-};
-
-// -------------------- Check Payment Status --------------------
-// GET /api/payment/status/:transactionId
-export const checkPaymentStatus = async (req, res) => {
-  try {
-    const { transactionId } = req.params;
-
-    const order = await Order.findOne({ transactionId }).populate("items.product");
-
+    const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    res.status(200).json({
-      success: true,
-      order: {
-        _id: order._id,
-        transactionId: order.transactionId,
-        paymentStatus: order.paymentStatus,
-        paymentMethod: order.paymentMethod,
-        paymentDetails: order.paymentDetails,
-        total: order.total,
-        status: order.status,
-        items: order.items,
-        customer: order.customer,
-        createdAt: order.createdAt,
-      },
+    const paymentAmount = parseNumber(amount, -1);
+    if (paymentAmount <= 0) {
+      return res.status(400).json({ message: "Payment amount must be greater than 0" });
+    }
+
+    // Check if total payments exceed order total
+    const existingPayments = await Payment.find({ orderId, status: "completed" });
+    const totalPaid = existingPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    if (totalPaid + paymentAmount > order.total) {
+      return res.status(400).json({
+        message: `Payment would exceed order total. Order total: ${order.total}, Already paid: ${totalPaid}`
+      });
+    }
+
+    const payment = await Payment.create({
+      orderId,
+      amount: paymentAmount,
+      method,
+      status,
+      transactionId,
+      reference,
+      notes,
+      processedBy: {
+        userId: req.user?._id || null,
+        name: req.user?.name || "",
+        email: req.user?.email || "",
+      }
+    });
+
+    // Update order payment status
+    const newTotalPaid = totalPaid + paymentAmount;
+    const newPaymentStatus = newTotalPaid >= order.total ? "paid" :
+                            newTotalPaid > 0 ? "unpaid" : "unpaid";
+
+    await Order.findByIdAndUpdate(orderId, {
+      paymentStatus: newPaymentStatus
+    });
+
+    // Update sold count for products if payment is completed
+    if (status === "completed") {
+      await Promise.all(order.items.map(async (item) => {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { sold: item.qty },
+        });
+      }));
+    }
+
+    res.status(201).json({
+      message: "Payment recorded successfully",
+      payment,
+      orderPaymentStatus: newPaymentStatus
     });
   } catch (error) {
-    console.error("Check payment status error:", error);
+    console.log(error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
 
-// -------------------- IPN (Instant Payment Notification) --------------------
-// POST /api/payment/ipn
-export const paymentIPN = async (req, res) => {
+// Get payments for an order
+export const getOrderPayments = async (req, res) => {
   try {
-    const { order_id } = req.body;
+    const { orderId } = req.params;
 
-    if (!order_id) {
-      return res.status(400).json({ message: "Order ID is required" });
-    }
+    const payments = await Payment.find({ orderId })
+      .sort({ createdAt: -1 });
 
-    try {
-      const shurjopay = await getShurjoPay();
-      const response = await verifyPaymentAsync(shurjopay, order_id);
-      const paymentInfo = response[0];
+    const totalPaid = payments
+      .filter(p => p.status === "completed")
+      .reduce((sum, p) => sum + p.amount, 0);
 
-      if (paymentInfo && paymentInfo.sp_code === "1000") {
-        const order = await Order.findOne({ transactionId: order_id });
-
-        if (order && order.paymentStatus !== "paid") {
-          order.paymentStatus = "paid";
-          order.paymentDetails = {
-            spOrderId: paymentInfo.sp_order_id,
-            bankTranId: paymentInfo.bank_trx_id,
-            cardType: paymentInfo.method,
-            currencyType: paymentInfo.currency,
-            currencyAmount: parseFloat(paymentInfo.amount),
-            validatedOn: new Date(paymentInfo.date_time),
-            bankStatus: paymentInfo.bank_status,
-            spMessage: paymentInfo.sp_message,
-          };
-          await order.save();
-
-          const updatePromises = order.items.map((item) =>
-            Product.findByIdAndUpdate(item.product, {
-              $inc: { sold: item.qty },
-            })
-          );
-          await Promise.all(updatePromises);
-        }
-      }
-
-      res.status(200).json({ message: "IPN processed" });
-    } catch (verifyError) {
-      console.error("IPN verification error:", verifyError);
-      res.status(500).json({ message: "IPN processing failed" });
-    }
+    res.status(200).json({
+      payments,
+      totalPaid,
+      count: payments.length
+    });
   } catch (error) {
-    console.error("IPN error:", error);
-    res.status(500).json({ message: "IPN processing failed" });
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
   }
 };
 
-// -------------------- Get All Transactions (Admin) --------------------
-// GET /api/payment/transactions
-export const getAllTransactions = async (req, res) => {
+// Get all payments (admin)
+export const getAllPayments = async (req, res) => {
   try {
-    const { status, startDate, endDate, page = 1, limit = 20 } = req.query;
+    const {
+      startDate,
+      endDate,
+      method,
+      status,
+      limit = 50,
+      page = 1
+    } = req.query;
 
-    const query = { paymentMethod: "ShurjoPay" };
+    let filter = {};
 
-    if (status) {
-      query.paymentStatus = status;
+    // Date filtering
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
-    if (startDate && endDate) {
-      query.createdAt = {
-        $gte: new Date(startDate),
-        $lte: new Date(`${endDate}T23:59:59.999Z`),
-      };
-    }
+    // Method filtering
+    if (method) filter.method = method;
+
+    // Status filtering
+    if (status) filter.status = status;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [transactions, total] = await Promise.all([
-      Order.find(query)
+    const [payments, totalCount] = await Promise.all([
+      Payment.find(filter)
+        .populate('orderId', 'total customer.name paymentStatus')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit))
-        .populate("items.product", "name image"),
-      Order.countDocuments(query),
+        .limit(parseInt(limit)),
+      Payment.countDocuments(filter)
     ]);
 
     res.status(200).json({
-      success: true,
-      transactions,
+      payments,
       pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit)),
-      },
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalCount / parseInt(limit)),
+        totalCount,
+        limit: parseInt(limit)
+      }
     });
   } catch (error) {
-    console.error("Get transactions error:", error);
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// Update payment status
+export const updatePaymentStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    const oldStatus = payment.status;
+    payment.status = status;
+    if (notes) payment.notes = notes;
+
+    await payment.save();
+
+    // Update order payment status and product sold counts if status changed
+    const order = await Order.findById(payment.orderId);
+    if (order) {
+      const allPayments = await Payment.find({ orderId: payment.orderId });
+      const totalPaid = allPayments
+        .filter(p => p.status === "completed")
+        .reduce((sum, p) => sum + p.amount, 0);
+
+      const newPaymentStatus = totalPaid >= order.total ? "paid" :
+                              totalPaid > 0 ? "unpaid" : "unpaid";
+
+      await Order.findByIdAndUpdate(payment.orderId, {
+        paymentStatus: newPaymentStatus
+      });
+
+      // Adjust sold counts based on status change
+      if (oldStatus !== "completed" && status === "completed") {
+        // Payment completed - increase sold counts
+        await Promise.all(order.items.map(async (item) => {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { sold: item.qty },
+          });
+        }));
+      } else if (oldStatus === "completed" && status !== "completed") {
+        // Payment no longer completed - decrease sold counts
+        await Promise.all(order.items.map(async (item) => {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { sold: -item.qty },
+          });
+        }));
+      }
+    }
+
+    res.status(200).json({
+      message: "Payment status updated",
+      payment
+    });
+  } catch (error) {
+    console.log(error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 };
 
-// -------------------- Check Payment Config (Debug) --------------------
-// GET /api/payment/config-check
-export const checkPaymentConfig = async (req, res) => {
-  const config = {
-    SP_ENDPOINT: process.env.SP_ENDPOINT ? "✅ Set" : "❌ Missing",
-    SP_USERNAME: process.env.SP_USERNAME ? "✅ Set" : "❌ Missing",
-    SP_PASSWORD: process.env.SP_PASSWORD ? "✅ Set (hidden)" : "❌ Missing",
-    SP_PREFIX: process.env.SP_PREFIX ? "✅ Set" : "❌ Missing",
-    SP_RETURN_URL: process.env.SP_RETURN_URL || "❌ Missing",
-    FRONTEND_URL: process.env.FRONTEND_URL || "❌ Missing",
-  };
+// Delete payment
+export const deletePayment = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  const missingVars = checkShurjoPayConfig();
-  const isConfigured = missingVars.length === 0;
+    const payment = await Payment.findById(id);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
 
-  res.status(200).json({
-    success: isConfigured,
-    message: isConfigured ? "ShurjoPay is configured" : "ShurjoPay is NOT configured",
-    missing: missingVars,
-    config,
-  });
+    // Don't allow deletion of completed payments
+    if (payment.status === "completed") {
+      return res.status(400).json({
+        message: "Cannot delete completed payments. Mark as refunded instead."
+      });
+    }
+
+    await payment.deleteOne();
+
+    res.status(200).json({ message: "Payment deleted successfully" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+// Process ShurjoPay payment
+export const processShurjoPayPayment = async (req, res) => {
+  try {
+    const {
+      orderId,
+      amount,
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerAddress,
+      customerCity,
+      customerPostcode
+    } = req.body;
+
+    if (!orderId || !amount) {
+      return res.status(400).json({ message: "orderId and amount are required" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Import ShurjoPay dynamically to avoid issues if not installed
+    const Shurjopay = (await import("shurjopay")).default;
+
+    const shurjopay = new Shurjopay();
+
+    const paymentData = {
+      amount: parseFloat(amount),
+      order_id: `ORDER_${orderId}_${Date.now()}`,
+      currency: "BDT",
+      customer_name: customerName || order.customer.name,
+      customer_email: customerEmail || order.customer.email,
+      customer_phone: customerPhone || order.customer.phone,
+      customer_address: customerAddress || "N/A",
+      customer_city: customerCity || "N/A",
+      customer_postcode: customerPostcode || "0000",
+      client_url: {
+        success: `${process.env.FRONTEND_URL}/payment/success`,
+        cancel: `${process.env.FRONTEND_URL}/payment/cancel`,
+        fail: `${process.env.FRONTEND_URL}/payment/fail`
+      }
+    };
+
+    const shurjopayResponse = await shurjopay.makePayment(paymentData);
+
+    if (shurjopayResponse.checkout_url) {
+      // Create pending payment record
+      const payment = await Payment.create({
+        orderId,
+        amount: parseFloat(amount),
+        method: "shurjopay",
+        status: "pending",
+        spOrderId: shurjopayResponse.sp_order_id,
+        processedBy: {
+          userId: req.user?._id || null,
+          name: req.user?.name || "",
+          email: req.user?.email || "",
+        }
+      });
+
+      res.status(200).json({
+        message: "ShurjoPay payment initiated",
+        checkout_url: shurjopayResponse.checkout_url,
+        payment
+      });
+    } else {
+      res.status(400).json({ message: "Failed to initiate ShurjoPay payment" });
+    }
+  } catch (error) {
+    console.log("ShurjoPay payment error:", error);
+    res.status(500).json({ message: "Payment processing failed", error: error.message });
+  }
+};
+
+// ShurjoPay payment verification callback
+export const verifyShurjoPayPayment = async (req, res) => {
+  try {
+    const {
+      order_id,
+      currency,
+      amount,
+      payable_amount,
+      payment_status,
+      method,
+      bank_tran_id,
+      sp_message,
+      sp_code,
+      cus_name,
+      cus_email,
+      cus_phone,
+      cus_address,
+      cus_city,
+      cus_postcode
+    } = req.body;
+
+    // Extract order ID from order_id (format: ORDER_{orderId}_{timestamp})
+    const orderId = order_id.split('_')[1];
+
+    const payment = await Payment.findOne({ orderId, spOrderId: order_id });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Payment record not found" });
+    }
+
+    // Update payment with verification data
+    payment.status = payment_status === "Completed" ? "completed" : "failed";
+    payment.transactionId = bank_tran_id;
+    payment.bankTranId = bank_tran_id;
+    payment.currencyType = currency;
+    payment.currencyAmount = amount;
+    payment.bankStatus = payment_status;
+    payment.spMessage = sp_message;
+    payment.spCode = sp_code;
+    payment.validatedOn = new Date();
+
+    await payment.save();
+
+    // Update order and product sold counts if payment completed
+    if (payment.status === "completed") {
+      const order = await Order.findById(orderId);
+      if (order) {
+        // Update order payment status
+        const allPayments = await Payment.find({ orderId, status: "completed" });
+        const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+
+        const newPaymentStatus = totalPaid >= order.total ? "paid" : "unpaid";
+        await Order.findByIdAndUpdate(orderId, { paymentStatus: newPaymentStatus });
+
+        // Update sold counts
+        await Promise.all(order.items.map(async (item) => {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { sold: item.qty },
+          });
+        }));
+      }
+    }
+
+    res.status(200).json({
+      message: "Payment verified successfully",
+      payment
+    });
+  } catch (error) {
+    console.log("Payment verification error:", error);
+    res.status(500).json({ message: "Payment verification failed", error: error.message });
+  }
+};
+
+// Process SSLCommerz payment
+export const processSSLCommerzPayment = async (req, res) => {
+  try {
+    const {
+      orderId,
+      amount,
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerAddress
+    } = req.body;
+
+    if (!orderId || !amount) {
+      return res.status(400).json({ message: "orderId and amount are required" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Import SSLCommerz dynamically
+    const SSLCommerzPayment = (await import("sslcommerz-lts")).default;
+
+    const sslcz = new SSLCommerzPayment(
+      process.env.SSLC_STORE_ID,
+      process.env.SSLC_STORE_PASSWORD,
+      false // Set to true for live mode
+    );
+
+    const data = {
+      total_amount: parseFloat(amount),
+      currency: 'BDT',
+      tran_id: `SSL_${orderId}_${Date.now()}`,
+      success_url: `${process.env.FRONTEND_URL}/payment/ssl-success`,
+      fail_url: `${process.env.FRONTEND_URL}/payment/ssl-fail`,
+      cancel_url: `${process.env.FRONTEND_URL}/payment/ssl-cancel`,
+      ipn_url: `${process.env.BACKEND_URL}/api/payment/ssl-ipn`,
+      shipping_method: 'NO',
+      product_name: 'Order Payment',
+      product_category: 'E-commerce',
+      product_profile: 'general',
+      cus_name: customerName || order.customer.name,
+      cus_email: customerEmail || order.customer.email,
+      cus_add1: customerAddress || 'N/A',
+      cus_city: 'N/A',
+      cus_state: 'N/A',
+      cus_postcode: '0000',
+      cus_country: 'Bangladesh',
+      cus_phone: customerPhone || order.customer.phone,
+      ship_name: customerName || order.customer.name,
+      ship_add1: customerAddress || 'N/A',
+      ship_city: 'N/A',
+      ship_state: 'N/A',
+      ship_postcode: '0000',
+      ship_country: 'Bangladesh'
+    };
+
+    const sslResponse = await sslcz.init(data);
+
+    if (sslResponse.GatewayPageURL) {
+      // Create pending payment record
+      const payment = await Payment.create({
+        orderId,
+        amount: parseFloat(amount),
+        method: "sslcommerz",
+        status: "pending",
+        transactionId: data.tran_id,
+        processedBy: {
+          userId: req.user?._id || null,
+          name: req.user?.name || "",
+          email: req.user?.email || "",
+        }
+      });
+
+      res.status(200).json({
+        message: "SSLCommerz payment initiated",
+        gateway_url: sslResponse.GatewayPageURL,
+        payment
+      });
+    } else {
+      res.status(400).json({ message: "Failed to initiate SSLCommerz payment" });
+    }
+  } catch (error) {
+    console.log("SSLCommerz payment error:", error);
+    res.status(500).json({ message: "Payment processing failed", error: error.message });
+  }
+};
+
+// SSLCommerz IPN (Instant Payment Notification)
+export const sslCommerzIPN = async (req, res) => {
+  try {
+    const sslcData = req.body;
+
+    const payment = await Payment.findOne({ transactionId: sslcData.tran_id });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Payment record not found" });
+    }
+
+    // Update payment with SSLCommerz data
+    payment.status = sslcData.status === "VALID" ? "completed" : "failed";
+    payment.sslcTranId = sslcData.tran_id;
+    payment.sslcAmount = sslcData.amount;
+    payment.sslcCurrency = sslcData.currency;
+    payment.sslcStatus = sslcData.status;
+    payment.sslcCardType = sslcData.card_type;
+    payment.sslcCardNo = sslcData.card_no;
+    payment.sslcBankTranId = sslcData.bank_tran_id;
+    payment.sslcError = sslcData.error;
+
+    await payment.save();
+
+    // Update order and product sold counts if payment completed
+    if (payment.status === "completed") {
+      const order = await Order.findById(payment.orderId);
+      if (order) {
+        const allPayments = await Payment.find({ orderId: payment.orderId, status: "completed" });
+        const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+
+        const newPaymentStatus = totalPaid >= order.total ? "paid" : "unpaid";
+        await Order.findByIdAndUpdate(payment.orderId, { paymentStatus: newPaymentStatus });
+
+        await Promise.all(order.items.map(async (item) => {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { sold: item.qty },
+          });
+        }));
+      }
+    }
+
+    res.status(200).json({
+      message: "IPN processed successfully",
+      payment
+    });
+  } catch (error) {
+    console.log("IPN processing error:", error);
+    res.status(500).json({ message: "IPN processing failed", error: error.message });
+  }
 };

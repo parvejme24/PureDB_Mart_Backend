@@ -1,5 +1,4 @@
-import InventoryPurchase from "./inventory.model.js";
-import PurchaseReturn from "./purchaseReturn.model.js";
+import { InventoryPurchase, PurchaseReturn } from "./inventory.model.js";
 import Order from "../order/order.model.js";
 import Product from "../product/product.model.js";
 import Gift from "../gift/gift.model.js";
@@ -21,36 +20,10 @@ const normalizeDate = (value) => {
   return Number.isNaN(date.getTime()) ? new Date() : date;
 };
 
-const buildDateFilter = (startDate, endDate, year) => {
-  if (startDate || endDate) {
-    const filter = {};
-    if (startDate) filter.$gte = new Date(startDate);
-    if (endDate) filter.$lte = new Date(endDate);
-    return filter;
-  }
-  if (year) {
-    const start = new Date(`${year}-01-01T00:00:00.000Z`);
-    const end = new Date(`${Number(year) + 1}-01-01T00:00:00.000Z`);
-    return { $gte: start, $lt: end };
-  }
-  return null;
-};
-
-const getReturnedQuantity = async (purchaseRef, excludeReturnId = null) => {
-  const match = { purchaseRef };
-  if (excludeReturnId) {
-    match._id = { $ne: excludeReturnId };
-  }
-  const agg = await PurchaseReturn.aggregate([
-    { $match: match },
-    { $group: { _id: null, total: { $sum: "$quantity" } } },
-  ]);
-  return agg?.[0]?.total || 0;
-};
-
 export const createPurchase = async (req, res) => {
   try {
     const {
+      purchaseId,
       product,
       productName,
       sku = "",
@@ -83,7 +56,7 @@ export const createPurchase = async (req, res) => {
     }
 
     const totalPrice = qty * price;
-    const computedPurchaseId = generatePurchaseId();
+    const computedPurchaseId = purchaseId || generatePurchaseId();
     const purchaseDate = normalizeDate(date);
 
     const purchase = await InventoryPurchase.create({
@@ -129,20 +102,42 @@ export const createPurchase = async (req, res) => {
   }
 };
 
-export const getPurchases = async (_req, res) => {
+export const getPurchases = async (req, res) => {
   try {
-    const { startDate, endDate, year, limit } = _req.query;
-    const dateFilter = buildDateFilter(startDate, endDate, year);
-    const query = {};
-    if (dateFilter) query.date = dateFilter;
+    const { startDate, endDate, year, limit = 50 } = req.query;
 
-    const cursor = InventoryPurchase.find(query).sort({ date: -1 });
-    if (limit) {
-      const l = parseInt(limit, 10);
-      if (Number.isFinite(l) && l > 0) cursor.limit(l);
+    let filter = {};
+
+    // Date filtering
+    if (startDate || endDate) {
+      filter.date = {};
+      if (startDate) filter.date.$gte = new Date(startDate);
+      if (endDate) filter.date.$lte = new Date(endDate);
+    } else if (year) {
+      const startYear = new Date(`${year}-01-01`);
+      const endYear = new Date(`${year}-12-31`);
+      filter.date = { $gte: startYear, $lte: endYear };
     }
 
-    const purchases = await cursor;
+    const purchases = await InventoryPurchase.find(filter)
+      .sort({ date: -1 })
+      .limit(parseInt(limit));
+
+    res.status(200).json({ purchases });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+export const getRecentPurchases = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+
+    const purchases = await InventoryPurchase.find()
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
     res.status(200).json({ purchases });
   } catch (error) {
     console.log(error);
@@ -153,101 +148,72 @@ export const getPurchases = async (_req, res) => {
 export const updatePurchase = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      product,
-      productName,
-      sku,
-      date,
-      quantity,
-      unitPrice,
-      transportCost,
-      otherCost,
-      note,
-      source,
-      batchNumber,
-      expiryDate,
-      warehouse,
-    } = req.body;
+    const updates = req.body;
 
     const purchase = await InventoryPurchase.findById(id);
     if (!purchase) {
       return res.status(404).json({ message: "Purchase not found" });
     }
 
-    const oldQty = purchase.quantity;
-    const oldProduct = String(purchase.product);
-
-    const existingReturnsQty = await getReturnedQuantity(purchase._id);
-
-    // Do not allow changing product if returns already exist
-    if (product && String(product) !== oldProduct && existingReturnsQty > 0) {
-      return res.status(400).json({ message: "Cannot change product because returns exist for this purchase" });
+    // Check if returns exist for this purchase
+    const hasReturns = await PurchaseReturn.findOne({ purchaseRef: id });
+    if (hasReturns && (updates.product || updates.quantity)) {
+      return res.status(400).json({ message: "Cannot update product or quantity when returns exist" });
     }
 
-    if (product && String(product) !== oldProduct) {
-      const newProductExists = await Product.findById(product);
-      if (!newProductExists) {
-        return res.status(404).json({ message: "New product not found" });
+    // Calculate stock adjustment if quantity changed
+    let stockAdjustment = 0;
+    if (updates.quantity !== undefined && updates.quantity !== purchase.quantity) {
+      const newQty = parseNumber(updates.quantity, purchase.quantity);
+      if (newQty < 0) {
+        return res.status(400).json({ message: "Quantity cannot be negative" });
       }
-    }
 
-    const newQty = quantity !== undefined ? parseNumber(quantity, -1) : oldQty;
-    if (newQty <= 0) {
-      return res.status(400).json({ message: "Quantity must be greater than 0" });
-    }
-    if (newQty < existingReturnsQty) {
-      return res.status(400).json({ message: "Quantity cannot be less than already returned quantity" });
-    }
-
-    const newUnitPrice = unitPrice !== undefined ? parseNumber(unitPrice, -1) : purchase.unitPrice;
-    if (newUnitPrice < 0) {
-      return res.status(400).json({ message: "unitPrice cannot be negative" });
-    }
-
-    // Adjust stock for quantity and product changes
-    const qtyDiff = newQty - oldQty;
-
-    // If product changed, move stock from old product to new product
-    if (product && String(product) !== oldProduct) {
-      const oldProductDoc = await Product.findById(oldProduct);
-      if (!oldProductDoc || Number(oldProductDoc.stock || 0) < oldQty) {
-        return res.status(400).json({ message: "Cannot move purchase: insufficient stock on old product" });
+      // Check if reducing quantity below returned amounts
+      if (hasReturns) {
+        const totalReturned = await PurchaseReturn.aggregate([
+          { $match: { purchaseRef: purchase._id } },
+          { $group: { _id: null, total: { $sum: "$quantity" } } }
+        ]);
+        const returnedQty = totalReturned[0]?.total || 0;
+        if (newQty < returnedQty) {
+          return res.status(400).json({ message: "Cannot reduce quantity below returned amounts" });
+        }
       }
-      await Product.findByIdAndUpdate(oldProduct, { $inc: { stock: -oldQty } });
-      await Product.findByIdAndUpdate(product, {
-        $inc: { stock: newQty },
-        $set: { purchasePrice: newUnitPrice },
-      });
-    } else if (qtyDiff !== 0) {
-      // same product, adjust by diff; prevent negative stock
-      const productDoc = await Product.findById(oldProduct);
-      if (qtyDiff < 0 && Number(productDoc.stock || 0) < Math.abs(qtyDiff)) {
-        return res.status(400).json({ message: "Cannot reduce quantity below current stock" });
-      }
-      await Product.findByIdAndUpdate(oldProduct, {
-        $inc: { stock: qtyDiff },
-        $set: { purchasePrice: newUnitPrice },
-      });
-    } else {
-      await Product.findByIdAndUpdate(oldProduct, { $set: { purchasePrice: newUnitPrice } });
+
+      stockAdjustment = newQty - purchase.quantity;
     }
 
-    purchase.product = product || purchase.product;
-    purchase.productName = productName || purchase.productName;
-    if (sku !== undefined) purchase.sku = sku;
-    if (date !== undefined) purchase.date = normalizeDate(date);
-    purchase.quantity = newQty;
-    purchase.unitPrice = newUnitPrice;
-    purchase.totalPrice = newQty * newUnitPrice;
-    if (transportCost !== undefined) purchase.transportCost = parseNumber(transportCost, 0);
-    if (otherCost !== undefined) purchase.otherCost = parseNumber(otherCost, 0);
-    if (note !== undefined) purchase.note = note;
-    if (source !== undefined) purchase.source = source;
-    if (batchNumber !== undefined) purchase.batchNumber = batchNumber;
-    if (expiryDate !== undefined) purchase.expiryDate = expiryDate ? normalizeDate(expiryDate) : null;
-    if (warehouse !== undefined) purchase.warehouse = warehouse;
+    // Update purchase fields
+    const allowedUpdates = [
+      'productName', 'sku', 'date', 'quantity', 'unitPrice',
+      'transportCost', 'otherCost', 'note', 'source', 'batchNumber',
+      'expiryDate', 'warehouse', 'collectedBy'
+    ];
+
+    allowedUpdates.forEach(field => {
+      if (updates[field] !== undefined) {
+        if (field === 'date' || field === 'expiryDate') {
+          purchase[field] = updates[field] ? normalizeDate(updates[field]) : null;
+        } else if (field === 'quantity' || field === 'unitPrice' || field === 'transportCost' || field === 'otherCost') {
+          purchase[field] = parseNumber(updates[field], purchase[field]);
+        } else {
+          purchase[field] = updates[field];
+        }
+      }
+    });
+
+    // Recalculate total price
+    purchase.totalPrice = purchase.quantity * purchase.unitPrice;
 
     await purchase.save();
+
+    // Update product stock if quantity changed
+    if (stockAdjustment !== 0) {
+      await Product.findByIdAndUpdate(purchase.product, {
+        $inc: { stock: stockAdjustment }
+      });
+    }
 
     res.status(200).json({ message: "Purchase updated", purchase });
   } catch (error) {
@@ -259,36 +225,34 @@ export const updatePurchase = async (req, res) => {
 export const deletePurchase = async (req, res) => {
   try {
     const { id } = req.params;
+
     const purchase = await InventoryPurchase.findById(id);
     if (!purchase) {
       return res.status(404).json({ message: "Purchase not found" });
     }
 
-    const existingReturnsQty = await getReturnedQuantity(purchase._id);
-    if (existingReturnsQty > 0) {
+    // Check if returns exist
+    const hasReturns = await PurchaseReturn.findOne({ purchaseRef: id });
+    if (hasReturns) {
       return res.status(400).json({ message: "Cannot delete purchase with existing returns" });
     }
 
-    // Ensure we have enough stock to remove
-    const productDoc = await Product.findById(purchase.product);
-    if (!productDoc || Number(productDoc.stock || 0) < purchase.quantity) {
-      return res.status(400).json({ message: "Cannot delete: insufficient stock to reverse purchase" });
-    }
-
-    await InventoryPurchase.findByIdAndDelete(id);
+    // Reverse stock adjustment
     await Product.findByIdAndUpdate(purchase.product, {
-      $inc: { stock: -purchase.quantity },
+      $inc: { stock: -purchase.quantity }
     });
 
-    res.status(200).json({ message: "Purchase deleted" });
+    await purchase.deleteOne();
+
+    res.status(200).json({ message: "Purchase deleted successfully" });
   } catch (error) {
     console.log(error);
-    res.status(500).json({ message: "Server Error", error: error.message });
+    res.status(500).json({ message: "Server Error" });
   }
 };
 
 // Stock summary combining purchases, orders, gifts, and waste
-export const getStockSummary = async (_req, res) => {
+export const getStockSummary = async (req, res) => {
   try {
     const [
       purchasesAgg,
@@ -451,17 +415,22 @@ export const createPurchaseReturn = async (req, res) => {
       return res.status(404).json({ message: "Purchase record not found" });
     }
 
+    // Check total already returned for this purchase
+    const totalReturned = await PurchaseReturn.aggregate([
+      { $match: { purchaseRef: purchase._id } },
+      { $group: { _id: null, total: { $sum: "$quantity" } } }
+    ]);
+    const alreadyReturned = totalReturned[0]?.total || 0;
+
+    if (alreadyReturned + qty > purchase.quantity) {
+      return res.status(400).json({
+        message: `Cannot return more than purchased. Already returned: ${alreadyReturned}, Purchased: ${purchase.quantity}`
+      });
+    }
+
     const productDoc = await Product.findById(purchase.product);
     if (!productDoc) {
       return res.status(404).json({ message: "Product not found" });
-    }
-    if (Number(productDoc.stock || 0) < qty) {
-      return res.status(400).json({ message: "Not enough stock to record return" });
-    }
-
-    const alreadyReturned = await getReturnedQuantity(purchase._id);
-    if (alreadyReturned + qty > purchase.quantity) {
-      return res.status(400).json({ message: "Return quantity exceeds purchased quantity" });
     }
 
     const returnDoc = await PurchaseReturn.create({
@@ -492,10 +461,39 @@ export const createPurchaseReturn = async (req, res) => {
   }
 };
 
+export const getPurchaseReturns = async (req, res) => {
+  try {
+    const { startDate, endDate, year, limit = 50 } = req.query;
+
+    let filter = {};
+
+    // Date filtering
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    } else if (year) {
+      const startYear = new Date(`${year}-01-01`);
+      const endYear = new Date(`${year}-12-31`);
+      filter.createdAt = { $gte: startYear, $lte: endYear };
+    }
+
+    const returns = await PurchaseReturn.find(filter)
+      .populate('purchaseRef', 'purchaseId date')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
+
+    res.status(200).json({ returns });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
 export const updatePurchaseReturn = async (req, res) => {
   try {
     const { id } = req.params;
-    const { quantity, reason = "", note = "" } = req.body;
+    const { quantity, reason, note } = req.body;
 
     const returnDoc = await PurchaseReturn.findById(id);
     if (!returnDoc) {
@@ -504,41 +502,50 @@ export const updatePurchaseReturn = async (req, res) => {
 
     const purchase = await InventoryPurchase.findById(returnDoc.purchaseRef);
     if (!purchase) {
-      return res.status(404).json({ message: "Original purchase not found" });
+      return res.status(404).json({ message: "Associated purchase not found" });
     }
 
-    const qty = quantity !== undefined ? parseNumber(quantity, -1) : returnDoc.quantity;
-    if (qty <= 0) {
+    // Calculate new quantity
+    const newQty = quantity !== undefined ? parseNumber(quantity, returnDoc.quantity) : returnDoc.quantity;
+    if (newQty <= 0) {
       return res.status(400).json({ message: "Return quantity must be greater than 0" });
     }
 
-    const diff = qty - returnDoc.quantity; // positive means more return, reduce stock more
-    const productDoc = await Product.findById(returnDoc.product);
-    if (!productDoc) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-    if (diff > 0 && Number(productDoc.stock || 0) < diff) {
-      return res.status(400).json({ message: "Not enough stock to increase return quantity" });
+    // Check total returned doesn't exceed purchase quantity
+    const totalReturned = await PurchaseReturn.aggregate([
+      { $match: { purchaseRef: purchase._id, _id: { $ne: returnDoc._id } } },
+      { $group: { _id: null, total: { $sum: "$quantity" } } }
+    ]);
+    const alreadyReturned = totalReturned[0]?.total || 0;
+
+    if (alreadyReturned + newQty > purchase.quantity) {
+      return res.status(400).json({
+        message: `Cannot return more than purchased. Already returned: ${alreadyReturned}, Purchased: ${purchase.quantity}`
+      });
     }
 
-    const alreadyReturned = await getReturnedQuantity(purchase._id, returnDoc._id);
-    if (alreadyReturned + qty > purchase.quantity) {
-      return res.status(400).json({ message: "Return quantity exceeds purchased quantity" });
+    // Calculate stock adjustment
+    const qtyDiff = newQty - returnDoc.quantity;
+
+    // Check if we have enough stock for increase
+    if (qtyDiff > 0) {
+      const productDoc = await Product.findById(purchase.product);
+      if (!productDoc || productDoc.stock < qtyDiff) {
+        return res.status(400).json({ message: "Not enough stock to increase return quantity" });
+      }
     }
 
-    returnDoc.quantity = qty;
-    returnDoc.reason = reason;
-    returnDoc.note = note;
-    returnDoc.processedBy = {
-      userId: req.user?._id || returnDoc.processedBy?.userId || null,
-      name: req.user?.name || returnDoc.processedBy?.name || "",
-      email: req.user?.email || returnDoc.processedBy?.email || "",
-    };
+    // Update return record
+    returnDoc.quantity = newQty;
+    if (reason !== undefined) returnDoc.reason = reason;
+    if (note !== undefined) returnDoc.note = note;
+
     await returnDoc.save();
 
-    if (diff !== 0) {
-      await Product.findByIdAndUpdate(returnDoc.product, {
-        $inc: { stock: -diff },
+    // Adjust stock
+    if (qtyDiff !== 0) {
+      await Product.findByIdAndUpdate(purchase.product, {
+        $inc: { stock: -qtyDiff }
       });
     }
 
@@ -552,40 +559,20 @@ export const updatePurchaseReturn = async (req, res) => {
 export const deletePurchaseReturn = async (req, res) => {
   try {
     const { id } = req.params;
+
     const returnDoc = await PurchaseReturn.findById(id);
     if (!returnDoc) {
       return res.status(404).json({ message: "Purchase return not found" });
     }
 
-    await PurchaseReturn.findByIdAndDelete(id);
-
-    // Undo the stock deduction from this return
+    // Restore stock
     await Product.findByIdAndUpdate(returnDoc.product, {
-      $inc: { stock: returnDoc.quantity },
+      $inc: { stock: returnDoc.quantity }
     });
 
-    res.status(200).json({ message: "Purchase return deleted" });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-};
+    await returnDoc.deleteOne();
 
-export const getPurchaseReturns = async (_req, res) => {
-  try {
-    const { startDate, endDate, year, limit } = _req.query;
-    const dateFilter = buildDateFilter(startDate, endDate, year);
-    const query = {};
-    if (dateFilter) query.date = dateFilter;
-
-    const cursor = PurchaseReturn.find(query).sort({ date: -1 });
-    if (limit) {
-      const l = parseInt(limit, 10);
-      if (Number.isFinite(l) && l > 0) cursor.limit(l);
-    }
-
-    const returns = await cursor;
-    res.status(200).json({ returns });
+    res.status(200).json({ message: "Purchase return deleted successfully" });
   } catch (error) {
     console.log(error);
     res.status(500).json({ message: "Server Error" });
@@ -614,66 +601,37 @@ export const getLowStockProducts = async (req, res) => {
   }
 };
 
-export const updateLowStockConfig = async (req, res) => {
-  try {
-    const { productId } = req.params;
-    const { reorderPoint, minStockLevel, expiryWarningDays, expiryTracking } = req.body;
-
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-
-    if (reorderPoint !== undefined) {
-      const rp = parseNumber(reorderPoint, 0);
-      product.reorderPoint = rp;
-    }
-    if (minStockLevel !== undefined) {
-      const min = parseNumber(minStockLevel, 0);
-      product.minStockLevel = min;
-    }
-    if (expiryWarningDays !== undefined) {
-      const warn = parseNumber(expiryWarningDays, 0);
-      product.expiryWarningDays = warn;
-    }
-    if (expiryTracking !== undefined) {
-      product.expiryTracking = Boolean(expiryTracking);
-    }
-
-    await product.save();
-
-    res.status(200).json({ message: "Low stock / expiry config updated", product });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error" });
-  }
-};
-
 export const getExpiryAlerts = async (req, res) => {
   try {
-    const { windowDays, startDate, endDate, year, limit = 200 } = req.query;
-    const now = new Date();
-    const dateFilter = buildDateFilter(startDate, endDate, year);
+    const windowDays = parseNumber(req.query.windowDays, 30);
+    const limit = parseInt(req.query.limit) || 200;
 
-    let match = { expiryDate: { $ne: null } };
-    if (dateFilter) {
-      match.expiryDate = { ...match.expiryDate, ...dateFilter };
+    // Date filtering
+    const { startDate, endDate, year } = req.query;
+    let dateFilter = {};
+
+    if (startDate || endDate) {
+      dateFilter.expiryDate = {};
+      if (startDate) dateFilter.expiryDate.$gte = new Date(startDate);
+      if (endDate) dateFilter.expiryDate.$lte = new Date(endDate);
+    } else if (year) {
+      const startYear = new Date(`${year}-01-01`);
+      const endYear = new Date(`${year}-12-31`);
+      dateFilter.expiryDate = { $gte: startYear, $lte: endYear };
     } else {
-      const wd = parseNumber(windowDays, 30);
-      const limitDate = new Date();
-      limitDate.setDate(now.getDate() + wd);
-      match.expiryDate = { ...match.expiryDate, $lte: limitDate };
+      // Default to expiring within windowDays
+      const now = new Date();
+      const limit = new Date();
+      limit.setDate(now.getDate() + windowDays);
+      dateFilter.expiryDate = { $ne: null, $lte: limit };
     }
 
-    const cap = parseInt(limit, 10);
-    const capped = Number.isFinite(cap) && cap > 0 ? cap : 200;
-
-    const expiring = await InventoryPurchase.find(match)
+    const expiring = await InventoryPurchase.find(dateFilter)
       .sort({ expiryDate: 1 })
-      .limit(capped);
+      .limit(limit);
 
     const alerts = expiring.map((p) => {
-      const daysLeft = Math.ceil((p.expiryDate - now) / (1000 * 60 * 60 * 24));
+      const daysLeft = p.expiryDate ? Math.ceil((p.expiryDate - new Date()) / (1000 * 60 * 60 * 24)) : null;
       return {
         id: p._id,
         product: p.product,
@@ -693,17 +651,3 @@ export const getExpiryAlerts = async (req, res) => {
     res.status(500).json({ message: "Server Error" });
   }
 };
-
-export const getRecentPurchases = async (req, res) => {
-  try {
-    const { limit = 10 } = req.query;
-    const l = parseInt(limit, 10);
-    const capped = Number.isFinite(l) && l > 0 ? l : 10;
-    const purchases = await InventoryPurchase.find().sort({ createdAt: -1 }).limit(capped);
-    res.status(200).json({ purchases });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server Error" });
-  }
-};
-

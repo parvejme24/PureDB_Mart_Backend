@@ -2,6 +2,7 @@ import express from "express";
 import {
   getDashboardStats,
   getRevenueOverview,
+  getRevenueAnalytics,
   getProductPerformance,
   getCategoryPerformance,
   incrementProductView,
@@ -13,6 +14,7 @@ const dashboardRouter = express.Router();
 // Admin only routes
 dashboardRouter.get("/stats", protect, admin, getDashboardStats);
 dashboardRouter.get("/revenue-overview", protect, admin, getRevenueOverview);
+dashboardRouter.get("/revenue-analytics", protect, admin, getRevenueAnalytics);
 dashboardRouter.get("/product-performance", protect, admin, getProductPerformance);
 dashboardRouter.get("/category-performance", protect, admin, getCategoryPerformance);
 

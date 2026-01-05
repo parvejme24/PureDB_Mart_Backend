@@ -4,19 +4,22 @@ const ExpenseSchema = new mongoose.Schema(
   {
     expenseId: { type: String, required: true, unique: true },
     date: { type: Date, required: true },
-    name: { type: String, default: "" }, // person involved
+    involvedPerson: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        name: { type: String, required: true },
+        email: { type: String, required: true },
+      },
+    ],
     purpose: { type: String, required: true },
     amount: { type: Number, required: true },
-    category: { type: String, default: "" },
     note: { type: String, default: "" },
-    recordedBy: {
-      userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-      name: { type: String, default: "" },
-      email: { type: String, default: "" },
-    },
   },
   { timestamps: true }
 );
 
 export default mongoose.model("Expense", ExpenseSchema);
-

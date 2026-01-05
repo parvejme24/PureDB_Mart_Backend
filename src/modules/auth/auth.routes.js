@@ -8,6 +8,7 @@ import {
   changeUserRole,
   deleteUser,
   getAllUsers,
+  getCurrentUser,
 } from "./auth.controller.js";
 import { protect, admin } from "../../middleware/authMiddleware.js";
 
@@ -18,7 +19,7 @@ authRouter.post("/register", registerUser);
 authRouter.post("/login", loginUser);
 
 // Protected routes
-authRouter.get("/me", protect, getLoggedInUser);
+authRouter.get("/me", protect, getCurrentUser);
 authRouter.put("/update", protect, upload.single("image"), updateProfile);
 
 // Admin only routes

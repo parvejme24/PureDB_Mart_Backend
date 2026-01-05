@@ -24,10 +24,6 @@ const InventoryPurchaseSchema = new mongoose.Schema(
     product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
     productName: { type: String, required: true },
     sku: { type: String, default: "" },
-    batchNumber: { type: String, default: "" },
-    expiryDate: { type: Date, default: null },
-    warehouse: { type: String, default: "main" },
-    status: { type: String, default: "received" },
     date: { type: Date, required: true },
     quantity: { type: Number, required: true },
     unitPrice: { type: Number, required: true },
@@ -38,9 +34,31 @@ const InventoryPurchaseSchema = new mongoose.Schema(
     source: { type: String, default: "" }, // place or person the product was collected from
     collectedBy: { type: CollectedBySchema, default: {} }, // person who physically collected
     addedBy: { type: AddedBySchema, default: {} }, // logged in user who created entry
+    batchNumber: { type: String, default: "" },
+    expiryDate: { type: Date, default: null },
+    warehouse: { type: String, default: "main" },
   },
   { timestamps: true }
 );
 
-export default mongoose.model("InventoryPurchase", InventoryPurchaseSchema);
+const PurchaseReturnSchema = new mongoose.Schema(
+  {
+    purchaseId: { type: String, required: true },
+    purchaseRef: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryPurchase", required: true },
+    product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+    productName: { type: String, required: true },
+    sku: { type: String, default: "" },
+    quantity: { type: Number, required: true },
+    reason: { type: String, default: "" },
+    note: { type: String, default: "" },
+    processedBy: {
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      name: { type: String, default: "" },
+      email: { type: String, default: "" },
+    },
+  },
+  { timestamps: true }
+);
 
+export const InventoryPurchase = mongoose.model("InventoryPurchase", InventoryPurchaseSchema);
+export const PurchaseReturn = mongoose.model("PurchaseReturn", PurchaseReturnSchema);

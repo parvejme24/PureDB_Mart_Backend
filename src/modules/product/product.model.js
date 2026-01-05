@@ -5,6 +5,7 @@ const ProductSchema = new mongoose.Schema(
     name: { type: String, required: true, unique: true },
     slug: { type: String, required: true, unique: true },
     sku: { type: String, default: "", unique: false }, // optional product code
+    shortDescription: { type: String, default: "" },
     description: { type: String, required: true },
     price: { type: Number, required: true },
     discount: { type: Number, default: 0 }, // absolute discount amount in BDT
@@ -15,21 +16,27 @@ const ProductSchema = new mongoose.Schema(
       required: true,
     },
     stock: { type: Number, required: true },
-    unit: { type: String, default: "" }, // e.g., pcs, kg, box
+    weightUnit: { type: String, default: "" }, // e.g., pcs, kg, box
     sold: { type: Number, default: 0 },
-    brand: { type: String, default: "" },
-    barcode: { type: String, default: "" },
-    purchasePrice: { type: Number, default: 0 }, // latest purchase unit price
-    reorderPoint: { type: Number, default: 0 }, // low-stock threshold
-    minStockLevel: { type: Number, default: 0 }, // alternative threshold
-    expiryTracking: { type: Boolean, default: false },
-    expiryWarningDays: { type: Number, default: 30 },
     image: {
       url: { type: String, required: true },
       public_id: { type: String, required: true },
     },
     views: { type: Number, default: 0 },
-    sold: { type: Number, default: 0 },
+    productExpiryDays: { type: Date, default: null },
+    isDeliveryChargeFree: { type: Boolean, default: false },
+    transportCost: { type: Number, default: 0 },
+    otherCost: { type: Number, default: 0 },
+    note: { type: String, default: "" },
+    // Additional fields for better inventory management
+    unit: { type: String, default: "" }, // e.g., pcs, kg, box
+    brand: { type: String, default: "" },
+    barcode: { type: String, default: "" },
+    purchasePrice: { type: Number, default: 0 }, // cost price for profit calculation
+    reorderPoint: { type: Number, default: 0 }, // minimum stock level to trigger reorder
+    minStockLevel: { type: Number, default: 0 }, // minimum stock level alert
+    expiryTracking: { type: Boolean, default: false }, // enable expiry date tracking
+    expiryWarningDays: { type: Number, default: 30 }, // days before expiry to show warning
   },
   { timestamps: true }
 );
