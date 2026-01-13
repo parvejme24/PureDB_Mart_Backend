@@ -7,6 +7,7 @@ import authRouter from "./src/modules/auth/auth.routes.js";
 import categoryRouter from "./src/modules/category/category.routes.js";
 import productRouter from "./src/modules/product/product.routes.js";
 import productReviewRouter from "./src/modules/productReview/productReview.routes.js";
+import productWishlistRouter from "./src/modules/productWishlist/productWishlist.routes.js";
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/categories", categoryRouter);
 app.use("/api/products", productRouter);
 app.use("/api/reviews", productReviewRouter);
+app.use("/api/wishlist", productWishlistRouter);
 // app.use("/api/reviews", productReviewRouter);
 // app.use("/api/wishlist", productWishlistRouter);
 
