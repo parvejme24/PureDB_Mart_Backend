@@ -1,21 +1,12 @@
 import express from "express";
 import cors from "cors";
+import morgan from "morgan";
 import connectDB from "./src/config/db.js";
 
 import authRouter from "./src/modules/auth/auth.routes.js";
 import categoryRouter from "./src/modules/category/category.routes.js";
 import productRouter from "./src/modules/product/product.routes.js";
-import orderRouter from "./src/modules/order/order.routes.js";
-import dashboardRouter from "./src/modules/dashboard/dashboard.routes.js";
-import paymentRouter from "./src/modules/payment/payment.routes.js";
-import settingsRouter from "./src/modules/settings/settings.routes.js";
-import shippingRouter from "./src/modules/shipping/shipping.routes.js";
-import inventoryRouter from "./src/modules/inventory/inventory.routes.js";
-import giftRouter from "./src/modules/gift/gift.routes.js";
-import wasteRouter from "./src/modules/waste/waste.routes.js";
-import expenseRouter from "./src/modules/expense/expense.routes.js";
 import productReviewRouter from "./src/modules/productReview/productReview.routes.js";
-import productWishlistRouter from "./src/modules/productWishlist/productWishlist.routes.js";
 
 const app = express();
 
@@ -62,6 +53,7 @@ app.use(async (req, res, next) => {
 
 // Middleware
 app.use(cors(corsOptions));
+app.use(morgan("combined")); // HTTP request logger
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // For ShurjoPay form data
 
@@ -74,17 +66,8 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/categories", categoryRouter);
 app.use("/api/products", productRouter);
-app.use("/api/orders", orderRouter);
-app.use("/api/dashboard", dashboardRouter);
-app.use("/api/payment", paymentRouter);
-app.use("/api/settings", settingsRouter);
-app.use("/api/shipping", shippingRouter);
-app.use("/api/inventory", inventoryRouter);
-app.use("/api/gifts", giftRouter);
-app.use("/api/waste", wasteRouter);
-app.use("/api/expenses", expenseRouter);
-
 app.use("/api/reviews", productReviewRouter);
-app.use("/api/wishlist", productWishlistRouter);
+// app.use("/api/reviews", productReviewRouter);
+// app.use("/api/wishlist", productWishlistRouter);
 
 export default app;

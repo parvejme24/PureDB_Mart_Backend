@@ -25,6 +25,18 @@ Backend server for **PureBD Mart**, a simple e-commerce platform selling honey, 
 
 ## Features
 
+### 🚀 HTTP Request Logging with Morgan
+The application includes Morgan middleware for comprehensive HTTP request logging:
+- **Format**: Combined (Apache-style) logging
+- **Logs**: IP, timestamp, method, URL, status code, response time, user agent
+- **Example**: `::1 - - [05/Jan/2026:16:30:00 +0000] "GET /api/products HTTP/1.1" 200 45 "-" "PostmanRuntime/7.39.0"`
+
+Morgan helps with:
+- **Debugging**: Track all incoming requests
+- **Monitoring**: Monitor API usage and performance
+- **Security**: Log suspicious activities
+- **Analytics**: Track user behavior patterns
+
 - **User Roles:** `User` & `Admin`  
 - **Authentication:** Email/password and Google login using NextAuth  
 - **Products & Categories:** CRUD APIs for managing products and categories  

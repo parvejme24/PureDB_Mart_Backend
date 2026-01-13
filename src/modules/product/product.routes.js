@@ -1,31 +1,36 @@
 import express from "express";
 import upload from "../../middleware/upload.js";
-import { protect, admin } from "../../middleware/authMiddleware.js";
 import {
   createProduct,
   getAllProducts,
   getProductBySlug,
-  getProductsByCategorySlug,
-  updateProduct,
-  deleteProduct,
   getBestSellingProducts,
   getDealOfTheDay,
+  updateProduct,
+  deleteProduct,
 } from "./product.controller.js";
 
-const productRouter = express.Router();
+const router = express.Router();
 
-// Public routes
-productRouter.get("/", getAllProducts);
-productRouter.get("/category/:slug", getProductsByCategorySlug);
-productRouter.get("/:slug", getProductBySlug);
+// Create new product
+router.post("/", upload.single("image"), createProduct);
 
-// Analytics routes (public for dashboard)
-productRouter.get("/analytics/best-selling", getBestSellingProducts);
-productRouter.get("/analytics/deal-of-the-day", getDealOfTheDay);
+// Get all products with filtering, pagination, and search
+router.get("/", getAllProducts);
 
-// Admin routes
-productRouter.post("/", protect, admin, upload.single("image"), createProduct);
-productRouter.put("/:id", protect, admin, upload.single("image"), updateProduct);
-productRouter.delete("/:id", protect, admin, deleteProduct);
+// Get product by slug
+router.get("/:slug", getProductBySlug);
 
-export default productRouter;
+// Get best selling products
+router.get("/best-selling", getBestSellingProducts);
+
+// Get deal of the day (top 10 best selling products)
+router.get("/deal-of-the-day", getDealOfTheDay);
+
+// Update product by id
+router.put("/:id", upload.single("image"), updateProduct);
+
+// Delete product by id
+router.delete("/:id", deleteProduct);
+
+export default router;

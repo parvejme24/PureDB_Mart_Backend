@@ -1,52 +1,36 @@
 import express from "express";
 import { protect, admin } from "../../middleware/authMiddleware.js";
 import {
-  createProductReview,
   getProductReviews,
-  getProductAverageRating,
-  updateProductReview,
-  deleteProductReview,
-  approveReview,
-  getUserReviews,
-  addReviewReply,
-  updateReviewReply,
+  addProductReview,
+  updateReview,
+  deleteOwnReview,
+  replyToReview,
+  deleteReview,
   deleteReviewReply,
-  getReviewReplies,
+  getAllReviews,
+  getUserReviews,
 } from "./productReview.controller.js";
 
-const productReviewRouter = express.Router();
-
-// Debug route to check server status
-productReviewRouter.get("/debug", (req, res) => {
-  res.json({
-    message: "Review API is working",
-    timestamp: new Date().toISOString(),
-    env: {
-      NODE_ENV: process.env.NODE_ENV,
-      JWT_SECRET: process.env.JWT_SECRET ? "Set" : "Not set",
-      MONGODB_URI: process.env.MONGODB_URI ? "Set" : "Not set",
-      CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME ? "Set" : "Not set",
-    }
-  });
-});
+const router = express.Router();
 
 // Public routes
-productReviewRouter.get("/product/:productId", getProductReviews);
-productReviewRouter.get("/product/:productId/average-rating", getProductAverageRating);
+router.get("/:productId", getProductReviews); // Get reviews for a product
 
-// Protected routes (authenticated users)
-productReviewRouter.post("/", protect, createProductReview);
-productReviewRouter.get("/user", protect, getUserReviews);
-productReviewRouter.put("/:id", protect, updateProductReview);
-productReviewRouter.delete("/:id", protect, deleteProductReview);
+// Protected routes (require login)
+router.use(protect);
 
-// Review replies
-productReviewRouter.post("/:reviewId/reply", protect, addReviewReply);
-productReviewRouter.get("/:reviewId/reply", getReviewReplies);
-productReviewRouter.put("/:reviewId/reply/:replyId", protect, updateReviewReply);
-productReviewRouter.delete("/:reviewId/reply/:replyId", protect, deleteReviewReply);
+// User routes
+router.post("/:productId", addProductReview); // Add review to product
+router.put("/:reviewId", updateReview); // Update own review
+router.put("/:reviewId/reply", replyToReview); // Add or update reply to review
+router.delete("/:reviewId", deleteOwnReview); // Delete own review
+router.delete("/:reviewId/reply", deleteReviewReply); // Delete own reply
+router.get("/user/:userId", admin, getUserReviews); // Admin: Get specific user's reviews
 
-// Admin routes
-productReviewRouter.put("/:reviewId/approve", protect, admin, approveReview);
+// Admin only routes
+router.get("/admin/all", admin, getAllReviews); // Get all reviews for admin
+router.delete("/:reviewId", admin, deleteReview); // Delete review
+router.delete("/:reviewId/reply", admin, deleteReviewReply); // Delete reply from review
 
-export default productReviewRouter;
+export default router;

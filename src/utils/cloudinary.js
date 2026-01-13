@@ -14,18 +14,23 @@ const configureCloudinary = () => {
  * Upload image to Cloudinary from buffer (memory storage)
  * @param {Buffer} buffer - File buffer
  * @param {string} folder - Cloudinary folder name
+ * @param {object} options - Additional upload options
  * @returns {Promise<{url: string, public_id: string}>}
  */
-export const uploadFromBuffer = (buffer, folder) => {
+export const uploadFromBuffer = (buffer, folder, options = {}) => {
   // Configure before upload
   configureCloudinary();
-  
+
+  // Merge default options with provided options
+  const uploadOptions = {
+    folder,
+    resource_type: "image",
+    ...options
+  };
+
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: "image",
-      },
+      uploadOptions,
       (error, result) => {
         if (error) {
           reject(error);
@@ -33,6 +38,10 @@ export const uploadFromBuffer = (buffer, folder) => {
           resolve({
             url: result.secure_url,
             public_id: result.public_id,
+            width: result.width,
+            height: result.height,
+            format: result.format,
+            bytes: result.bytes,
           });
         }
       }

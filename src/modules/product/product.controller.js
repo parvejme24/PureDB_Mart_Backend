@@ -1,169 +1,308 @@
 import Product from "./product.model.js";
-import Category from "../category/category.model.js";
-import {
-  validateProductData,
-  doesCategoryExist,
-  generateProductSlug,
-  uploadProductImage,
-  deleteProductImage,
-  getBestSellingProductsData,
-  getDealOfTheDayData,
-  incrementProductViews
-} from "./product.utils.js";
+import { uploadFromBuffer, deleteImage } from "../../utils/cloudinary.js";
 
-// Create Product
+// Helper function to generate slug from product name
+const generateSlug = (name) => {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '') // Remove special characters
+    .replace(/[\s_-]+/g, '-') // Replace spaces and underscores with hyphens
+    .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+};
+
+// Helper function to create unique slug
+const createUniqueSlug = async (baseSlug) => {
+  let slug = baseSlug;
+  let counter = 1;
+
+  while (await Product.findOne({ slug })) {
+    slug = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  return slug;
+};
+
+// Create new product
 export const createProduct = async (req, res) => {
   try {
-    const validation = validateProductData(req.body);
-    if (!validation.isValid) {
-      return res.status(400).json({ message: "Validation failed", errors: validation.errors });
+    const productData = req.body;
+
+    // Auto-generate slug from product name
+    if (productData.name) {
+      const baseSlug = generateSlug(productData.name);
+      productData.slug = await createUniqueSlug(baseSlug);
     }
 
-    if (!(await doesCategoryExist(req.body.category))) {
-      return res.status(404).json({ message: "Category not found" });
+    // Handle image upload if provided
+    if (req.file) {
+      const folder = "products";
+      const uploadResult = await uploadFromBuffer(req.file.buffer, folder);
+
+      productData.image = {
+        url: uploadResult.url,
+        public_id: uploadResult.public_id,
+      };
     }
 
-    if (!req.file) return res.status(400).json({ message: "Product image is required" });
+    const product = new Product(productData);
+    await product.save();
 
-    const imageData = await uploadProductImage(req.file.buffer);
-    const product = await Product.create({
-      ...req.body,
-      slug: generateProductSlug(req.body.name),
-      image: imageData,
+    // Populate category after saving
+    await product.populate("category", "name slug");
+
+    res.status(201).json({
+      message: "Product created successfully",
+      product,
     });
-
-    const populatedProduct = await Product.findById(product._id).populate("category");
-    res.status(201).json({ message: "Product created successfully", product: populatedProduct });
   } catch (error) {
-    res.status(500).json({ message: "Server Error", error: error.message });
+    console.error("Create product error:", error);
+    if (error.code === 11000) {
+      res.status(400).json({
+        message: "Product with this name or slug already exists"
+      });
+    } else if (error.name === "ValidationError") {
+      res.status(400).json({
+        message: "Validation error",
+        errors: Object.values(error.errors).map(err => err.message)
+      });
+    } else {
+      res.status(500).json({
+        message: "Failed to create product",
+        error: error.message
+      });
+    }
   }
 };
 
-// Get All Products
+// Get all products
 export const getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find().populate("category").sort({ createdAt: -1 });
-    res.json({ products });
+    const {
+      page = 1,
+      limit = 10,
+      category,
+      minPrice,
+      maxPrice,
+      search,
+      sortBy = "createdAt",
+      sortOrder = "desc"
+    } = req.query;
+
+    // Build query
+    let query = {};
+
+    if (category) {
+      query.category = category;
+    }
+
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice) query.price.$gte = Number(minPrice);
+      if (maxPrice) query.price.$lte = Number(maxPrice);
+    }
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+        { shortDescription: { $regex: search, $options: "i" } }
+      ];
+    }
+
+    // Build sort
+    const sort = {};
+    sort[sortBy] = sortOrder === "desc" ? -1 : 1;
+
+    const products = await Product.find(query)
+      .populate("category", "name slug")
+      .sort(sort)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .exec();
+
+    const total = await Product.countDocuments(query);
+
+    res.status(200).json({
+      products,
+      pagination: {
+        currentPage: Number(page),
+        totalPages: Math.ceil(total / limit),
+        totalProducts: total,
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
-    res.status(500).json({ message: "Server Error" });
+    console.error("Get all products error:", error);
+    res.status(500).json({
+      message: "Failed to fetch products",
+      error: error.message
+    });
   }
 };
 
-// Get Product By Slug
+// Get product by slug
 export const getProductBySlug = async (req, res) => {
   try {
-    const product = await Product.findOne({ slug: req.params.slug }).populate("category");
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    const { slug } = req.params;
 
-    incrementProductViews(product._id);
-    res.json({ product });
-  } catch (error) {
-    res.status(500).json({ message: "Server Error" });
-  }
-};
+    const product = await Product.findOne({ slug })
+      .populate("category", "name slug");
 
-// Get Products By Category Slug
-export const getProductsByCategorySlug = async (req, res) => {
-  try {
-    const category = await Category.findOne({ slug: req.params.slug });
-    if (!category) return res.status(404).json({ message: "Category not found" });
-
-    const products = await Product.find({ category: category._id })
-      .populate("category")
-      .sort({ createdAt: -1 });
-
-    res.json({ products });
-  } catch (error) {
-    res.status(500).json({ message: "Server Error" });
-  }
-};
-
-// Update Product
-export const updateProduct = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ message: "Product not found" });
-
-    const validation = validateProductData(req.body, true);
-    if (!validation.isValid) {
-      return res.status(400).json({ message: "Validation failed", errors: validation.errors });
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
     }
 
-    if (req.body.category && !(await doesCategoryExist(req.body.category))) {
-      return res.status(404).json({ message: "Category not found" });
-    }
+    // Increment views count
+    await Product.findByIdAndUpdate(product._id, { $inc: { views: 1 } });
 
-    // Update fields
-    Object.keys(req.body).forEach(key => {
-      if (req.body[key] !== undefined) {
-        if (key === 'name') {
-          product.name = req.body.name;
-          product.slug = generateProductSlug(req.body.name);
-        } else {
-          product[key] = req.body[key];
-        }
-      }
+    res.status(200).json({
+      product: {
+        ...product.toObject(),
+        views: product.views + 1, // Return updated view count
+      },
     });
-
-    if (req.file) {
-      await deleteProductImage(product.image?.public_id);
-      product.image = await uploadProductImage(req.file.buffer);
-    }
-
-    await product.save();
-    const updatedProduct = await Product.findById(product._id).populate("category");
-    res.json({ message: "Product updated successfully", product: updatedProduct });
   } catch (error) {
-    res.status(500).json({ message: "Server Error", error: error.message });
+    console.error("Get product by slug error:", error);
+    res.status(500).json({
+      message: "Failed to fetch product",
+      error: error.message
+    });
   }
 };
 
-// Delete Product
-export const deleteProduct = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ message: "Product not found" });
-
-    await deleteProductImage(product.image?.public_id);
-    await product.deleteOne();
-
-    res.json({ message: "Product deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-};
-
-// Get Best Selling Products
+// Get best selling products
 export const getBestSellingProducts = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 10;
-    const minSold = parseInt(req.query.minSold) || 1;
+    const { limit = 10 } = req.query;
 
-    const products = await getBestSellingProductsData({ limit, minSold });
-    res.json({ products, total: products.length });
-  } catch (error) {
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-};
+    const products = await Product.find({ sold: { $gt: 0 } })
+      .populate("category", "name slug")
+      .sort({ sold: -1 })
+      .limit(Number(limit));
 
-// Get Deal of the Day
-export const getDealOfTheDay = async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    const days = parseInt(req.query.days) || 7;
-
-    const products = await getDealOfTheDayData({ limit, days });
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    res.json({
-      message: `Recently ordered products (last ${days} days)`,
+    res.status(200).json({
       products,
-      total: products.length,
-      period: { startDate, days }
+      count: products.length,
     });
   } catch (error) {
-    res.status(500).json({ message: "Server Error", error: error.message });
+    console.error("Get best selling products error:", error);
+    res.status(500).json({
+      message: "Failed to fetch best selling products",
+      error: error.message
+    });
   }
 };
 
+// Get deal of the day (top 10 best selling products)
+export const getDealOfTheDay = async (req, res) => {
+  try {
+    const products = await Product.find({ sold: { $gt: 0 } })
+      .populate("category", "name slug")
+      .sort({ sold: -1 })
+      .limit(10);
+
+    res.status(200).json({
+      dealOfTheDay: products,
+      count: products.length,
+    });
+  } catch (error) {
+    console.error("Get deal of the day error:", error);
+    res.status(500).json({
+      message: "Failed to fetch deal of the day",
+      error: error.message
+    });
+  }
+};
+
+// Update product by id
+export const updateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // If there's a new image, handle image upload
+    if (req.file) {
+      const folder = "products";
+      const uploadResult = await uploadFromBuffer(req.file.buffer, folder);
+
+      updateData.image = {
+        url: uploadResult.url,
+        public_id: uploadResult.public_id,
+      };
+
+      // Delete old image if it exists
+      const existingProduct = await Product.findById(id);
+      if (existingProduct?.image?.public_id) {
+        await deleteImage(existingProduct.image.public_id);
+      }
+    }
+
+    const product = await Product.findByIdAndUpdate(
+      id,
+      updateData,
+      {
+        new: true,
+        runValidators: true,
+      }
+    ).populate("category", "name slug");
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    res.status(200).json({
+      message: "Product updated successfully",
+      product,
+    });
+  } catch (error) {
+    console.error("Update product error:", error);
+    if (error.code === 11000) {
+      res.status(400).json({
+        message: "Product with this name or slug already exists"
+      });
+    } else {
+      res.status(500).json({
+        message: "Failed to update product",
+        error: error.message
+      });
+    }
+  }
+};
+
+// Delete product by id
+export const deleteProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Delete associated image from Cloudinary
+    if (product.image?.public_id) {
+      await deleteImage(product.image.public_id);
+    }
+
+    await Product.findByIdAndDelete(id);
+
+    res.status(200).json({
+      message: "Product deleted successfully",
+      deletedProduct: {
+        id: product._id,
+        name: product.name,
+        slug: product.slug,
+      },
+    });
+  } catch (error) {
+    console.error("Delete product error:", error);
+    res.status(500).json({
+      message: "Failed to delete product",
+      error: error.message
+    });
+  }
+};
