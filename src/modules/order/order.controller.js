@@ -1,6 +1,7 @@
 import Order from "./order.model.js";
 import Product from "../product/product.model.js";
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail } from "../../utils/email.js";
+import { markCouponUsed } from "../coupon/coupon.controller.js";
 import { v4 as uuidv4 } from "uuid";
 
 // Create new order
@@ -79,6 +80,16 @@ export const createOrder = async (req, res) => {
       await Product.findByIdAndUpdate(item.product, {
         $inc: { stock: -item.quantity, sold: item.quantity }
       });
+    }
+
+    // Mark coupon as used if coupon was applied
+    if (coupon && coupon.code) {
+      try {
+        await markCouponUsed(coupon.code, user._id, order.orderId, discountAmount);
+      } catch (couponError) {
+        console.error("Failed to mark coupon as used:", couponError);
+        // Don't fail the order creation if coupon marking fails
+      }
     }
 
     // Send order confirmation email
