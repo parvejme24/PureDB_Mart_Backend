@@ -8,6 +8,7 @@ import categoryRouter from "./src/modules/category/category.routes.js";
 import productRouter from "./src/modules/product/product.routes.js";
 import productReviewRouter from "./src/modules/productReview/productReview.routes.js";
 import productWishlistRouter from "./src/modules/productWishlist/productWishlist.routes.js";
+import orderRouter from "./src/modules/order/order.routes.js";
 
 const app = express();
 
@@ -69,6 +70,7 @@ app.use("/api/categories", categoryRouter);
 app.use("/api/products", productRouter);
 app.use("/api/reviews", productReviewRouter);
 app.use("/api/wishlist", productWishlistRouter);
+app.use("/api/orders", orderRouter);
 // app.use("/api/reviews", productReviewRouter);
 // app.use("/api/wishlist", productWishlistRouter);
 
