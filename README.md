@@ -1,184 +1,233 @@
-# PureBD Mart Backend
+<div align="center">
 
-[![Node.js](https://img.shields.io/badge/Node.js-18.x-green)](https://nodejs.org/) 
-[![Express](https://img.shields.io/badge/Express-5.x-blue)](https://expressjs.com/) 
-[![MongoDB](https://img.shields.io/badge/MongoDB-8.x-green)](https://www.mongodb.com/) 
-[![License](https://img.shields.io/badge/License-ISC-yellow)](LICENSE)
+# 🍯 PureBD Mart — Backend
 
-Backend server for **PureBD Mart**, a simple e-commerce platform selling honey, dates, oils, fruits, fresh fish, and more. Built using **Node.js, Express, MongoDB, and NextAuth** for session-based authentication.
+**A robust REST API backend for a Bangladeshi e-commerce platform, built with Node.js, Express, and MongoDB.**
 
----
+[![Node.js](https://img.shields.io/badge/Node.js-18.x-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Express](https://img.shields.io/badge/Express-5.x-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-8.x-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Cloudinary](https://img.shields.io/badge/Cloudinary-Image_Uploads-3448C5?style=flat-square&logo=cloudinary&logoColor=white)](https://cloudinary.com/)
+[![License](https://img.shields.io/badge/License-ISC-yellow?style=flat-square)](#)
 
-## Table of Contents
+[Frontend Repo](#) · [Live API](#) · [Report Bug](#)
 
-- [Features](#features)  
-- [Tech Stack](#tech-stack)  
-- [Folder Structure](#folder-structure)  
-- [Getting Started](#getting-started)  
-- [Environment Variables](#environment-variables)  
-- [Running the Project](#running-the-project)  
-- [API Routes](#api-routes)  
-- [License](#license)  
-- [Author](#author)  
+</div>
 
 ---
 
-## Features
+## 📌 Overview
 
-### 🚀 HTTP Request Logging with Morgan
-The application includes Morgan middleware for comprehensive HTTP request logging:
-- **Format**: Combined (Apache-style) logging
-- **Logs**: IP, timestamp, method, URL, status code, response time, user agent
-- **Example**: `::1 - - [05/Jan/2026:16:30:00 +0000] "GET /api/products HTTP/1.1" 200 45 "-" "PostmanRuntime/7.39.0"`
-
-Morgan helps with:
-- **Debugging**: Track all incoming requests
-- **Monitoring**: Monitor API usage and performance
-- **Security**: Log suspicious activities
-- **Analytics**: Track user behavior patterns
-
-- **User Roles:** `User` & `Admin`  
-- **Authentication:** Email/password and Google login using NextAuth  
-- **Products & Categories:** CRUD APIs for managing products and categories  
-- **Orders:** Users can place orders without login; Admin can manage orders  
-- **Email Notifications:** Nodemailer for order confirmations and delivery updates  
-- **Cart:** Stores data in **localStorage** until checkout  
-- **Cash on Delivery:** Only payment method  
-- **Secure:** Environment variables for secrets and database credentials  
-- **Image Uploads:** Cloudinary integration for product images  
+PureBD Mart Backend is the REST API server powering the PureBD Mart e-commerce platform — a Bangladeshi store specializing in honey, dates, oils, fruits, fresh fish, and more. It handles authentication, product and category management, order processing, image uploads, and transactional email notifications.
 
 ---
 
-## Tech Stack
+## ✨ Features
 
-- **Backend:** Node.js, Express.js  
-- **Database:** MongoDB (Mongoose)  
-- **Authentication:** NextAuth (session-based)  
-- **Email:** Nodemailer  
-- **File Uploads:** Multer + Cloudinary  
-- **Other Tools:** Tailwind (frontend styling), slugify, bcryptjs  
+| Area                       | Details                                                      |
+| -------------------------- | ------------------------------------------------------------ |
+| 🔐 **Authentication**      | Email/password and Google OAuth via NextAuth (session-based) |
+| 👤 **User Roles**          | `User` and `Admin` role-based access control                 |
+| 📦 **Product Management**  | Full CRUD for products and categories (Admin only)           |
+| 🧾 **Order Management**    | Guest checkout support; Admin can update order status        |
+| 📧 **Email Notifications** | Nodemailer for order confirmations and delivery updates      |
+| 🖼️ **Image Uploads**       | Multer + Cloudinary for cloud-based product image storage    |
+| 📝 **Request Logging**     | Morgan middleware with Apache-style combined logging         |
+| 💳 **Payment**             | Cash on Delivery (COD) only                                  |
+| 🔒 **Security**            | Environment-variable-based secret management                 |
 
 ---
 
-## Folder Structure
+## 🛠️ Tech Stack
 
+### Core
+
+- **Runtime:** Node.js 18.x
+- **Framework:** Express.js 5.x
+- **Database:** MongoDB 8.x (Mongoose ODM)
+
+### Integrations
+
+- **Authentication:** NextAuth.js (session-based)
+- **Email:** Nodemailer
+- **File Uploads:** Multer + Cloudinary
+- **Logging:** Morgan
+
+### Utilities
+
+- `bcryptjs` — Password hashing
+- `slugify` — URL-friendly slugs for products
+- `dotenv` — Environment variable management
+
+---
+
+## 📁 Project Structure
+
+```
 PureBD_Mart_Backend/
-│
-├─ src/
-│   ├─ config/
-│   │   └─ db.js              # MongoDB connection
-│   ├─ controllers/           # API logic for each route
-│   ├─ models/                # Mongoose models
-│   ├─ routes/                # Express routes
-│   └─ utils/                 # Utility functions
-│
-├─ app.js                     # Express app setup
-├─ index.js                   # Server entry point
-├─ package.json
-├─ .env                       # Environment variables (not committed)
-└─ .gitignore
+├── src/
+│   ├── config/
+│   │   └── db.js              # MongoDB connection setup
+│   ├── controllers/           # Route handler logic
+│   ├── models/                # Mongoose schemas & models
+│   ├── routes/                # Express route definitions
+│   └── utils/                 # Helper functions & utilities
+├── app.js                     # Express app configuration
+├── index.js                   # Server entry point
+├── .env                       # Environment variables (not committed)
+├── .gitignore
+└── package.json
+```
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js v18+  
-- npm  
-- MongoDB Atlas account or local MongoDB instance  
-- Cloudinary account (optional for image uploads)  
-
----
+- **Node.js** v18 or higher
+- **npm**
+- **MongoDB** (Atlas or local instance)
+- **Cloudinary** account (for image uploads)
 
 ### Installation
 
-1. **Clone the repository**
+**1. Clone the repository**
 
 ```bash
 git clone https://github.com/parvejme24/PureDB_Mart_Backend.git
 cd PureBD_Mart_Backend
+```
 
+**2. Install dependencies**
 
-
-Install dependencies
-
-
+```bash
 npm install
+```
 
+**3. Configure environment variables**
 
+Create a `.env` file in the root directory:
 
-Create a .env file at the root:
+```env
+# Server
+PORT=5050
 
-
-# MongoDB Connection
+# MongoDB
 MONGODB_URI=mongodb+srv://<DB_USER>:<DB_PASS>@cluster0.mongodb.net/PureDB_Mart_DB
 
-# NextAuth Secret (for session encryption)
+# NextAuth
 NEXTAUTH_SECRET=your_super_secure_secret_here
 
-# Cloudinary (optional, for product images)
+# Cloudinary (for product image uploads)
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
 
+# Email (Nodemailer)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+```
 
-Running the Project
-Development mode with nodemon:
+**4. Start the server**
+
+```bash
+# Development (with hot reload)
 npm run dev
 
-Production mode:
+# Production
 npm start
+```
 
-Server will run at: http://localhost:5050
-
-API Routes
-RouteMethodDescription/api/authPOSTUser login / Google login via NextAuth/api/productsGETGet all products/api/productsPOSTAdd new product (Admin only)/api/products/:idGETGet single product/api/products/:idPUTUpdate product (Admin only)/api/products/:idDELETEDelete product (Admin only)/api/categoriesGETGet all categories/api/categoriesPOSTAdd new category (Admin only)/api/ordersGETGet all orders (Admin only)/api/ordersPOSTPlace new order/api/orders/:idPATCHUpdate order status (Admin only)
-
-Note: Cart data is stored in localStorage on the frontend. Orders are saved to the database only when the user places an order.
-
-
-Environment Variables
-Make sure to configure all variables in .env:
-MONGODB_URI=your_mongodb_connection_string
-NEXTAUTH_SECRET=your_nextauth_secret
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-
-
-License
-This project is licensed under the ISC License.
-
-Author
-Md Parvej
-
-
-GitHub: parvejme24
-
-
-Email: your-email@example.com
-
-
-
-✨ Built with ❤️ by Md Parvej
+Server runs at: `http://localhost:5050`
 
 ---
 
-This is a **complete, professional README** that is ready to push to GitHub.  
+## 📡 API Reference
 
-It includes:
+### Auth
 
-- Badges  
-- Features & Tech Stack  
-- Folder Structure  
-- Setup Instructions  
-- API Documentation  
-- Environment variables  
-- Author & License  
+| Method | Endpoint    | Description                            |
+| ------ | ----------- | -------------------------------------- |
+| `POST` | `/api/auth` | User login / Google login via NextAuth |
+
+### Products
+
+| Method   | Endpoint            | Access | Description          |
+| -------- | ------------------- | ------ | -------------------- |
+| `GET`    | `/api/products`     | Public | Get all products     |
+| `GET`    | `/api/products/:id` | Public | Get a single product |
+| `POST`   | `/api/products`     | Admin  | Create a new product |
+| `PUT`    | `/api/products/:id` | Admin  | Update a product     |
+| `DELETE` | `/api/products/:id` | Admin  | Delete a product     |
+
+### Categories
+
+| Method | Endpoint          | Access | Description           |
+| ------ | ----------------- | ------ | --------------------- |
+| `GET`  | `/api/categories` | Public | Get all categories    |
+| `POST` | `/api/categories` | Admin  | Create a new category |
+
+### Orders
+
+| Method  | Endpoint          | Access | Description                       |
+| ------- | ----------------- | ------ | --------------------------------- |
+| `POST`  | `/api/orders`     | Public | Place a new order (guest allowed) |
+| `GET`   | `/api/orders`     | Admin  | Get all orders                    |
+| `PATCH` | `/api/orders/:id` | Admin  | Update order status               |
+
+> **Note:** Cart data is managed on the frontend via `localStorage` and only persisted to the database when an order is placed.
 
 ---
 
-If you want, I can also make a **fancier version with images/icons for API routes and workflow diagram**, which looks **very attractive for clients**.  
+## 📊 Request Logging
 
-Do you want me to do that?
+Morgan is configured with the **combined** (Apache-style) log format, capturing:
+
+```
+::1 - - [05/Jan/2026:16:30:00 +0000] "GET /api/products HTTP/1.1" 200 45 "-" "PostmanRuntime/7.39.0"
+```
+
+This provides visibility into IP addresses, request methods, status codes, response times, and user agents — useful for debugging, monitoring, and detecting suspicious activity.
+
+---
+
+## 🔑 Environment Variables
+
+| Variable                | Required | Description                            |
+| ----------------------- | -------- | -------------------------------------- |
+| `PORT`                  | No       | Server port (default: `5050`)          |
+| `MONGODB_URI`           | ✅       | MongoDB connection string              |
+| `NEXTAUTH_SECRET`       | ✅       | Secret for NextAuth session encryption |
+| `CLOUDINARY_CLOUD_NAME` | Optional | Cloudinary cloud name                  |
+| `CLOUDINARY_API_KEY`    | Optional | Cloudinary API key                     |
+| `CLOUDINARY_API_SECRET` | Optional | Cloudinary API secret                  |
+| `SMTP_HOST`             | Optional | SMTP server host                       |
+| `SMTP_PORT`             | Optional | SMTP server port                       |
+| `SMTP_USER`             | Optional | SMTP username                          |
+| `SMTP_PASS`             | Optional | SMTP app password                      |
+
+---
+
+## 📜 Available Scripts
+
+```bash
+npm run dev    # Start with nodemon (hot reload)
+npm start      # Start in production mode
+```
+
+---
+
+## 📄 License
+
+This project is licensed under the **ISC License**.
+
+---
+
+<div align="center">
+
+Built with ❤️ by [Md Parvej](https://github.com/parvejme24) · [parvejme24@gmail.com](mailto:parvejme24@gmail.com)
+
+</div>
